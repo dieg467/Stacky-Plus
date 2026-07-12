@@ -84,9 +84,9 @@ If you don't want separators in the menu, you can skip this step.
 
 By default, items (folder, subfolder, shortcut, separator) are sorted alphabetically, and will be sorted accordingly in the corresponding menu or submenu.
 
-However, if you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The %01% prefix will not be displayed in the menu.
+However, if you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The ```%01%``` prefix will not be displayed in the menu.
 
-Subsequent items will be named %02%, %03%, etc. If an item does not have a prefix, it will be sorted alphabetically.
+Subsequent items will be named ```%02%```, ```%03%```, etc. If an item does not have a prefix, it will be sorted alphabetically.
 
 <img width="752" height="423" alt="06a- Ordenamiento" src="https://github.com/user-attachments/assets/02dfcbc5-fb3a-43a5-b2b1-dea9af488771" />
 
@@ -148,19 +148,19 @@ If you change the menu mode, for example, from "Menu and Submenu" to "Grid" (or 
 --------------
 To display the menu as a grid of icons, right-click the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a space and add:
 
---Options iconmenu-NN
+```--Options iconmenu-NN```
 
-"NN" should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type --Options iconmenu-03.
+NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type ```--Options iconmenu-03```
 
 <img width="572" height="264" alt="00b- EscritorioW-Cuadrícula" src="https://github.com/user-attachments/assets/ab4a52c5-463d-4dc7-bf47-d6e84af2e99a" />
 
-### GRAID MENU WITH NAMES
+### GRID MENU WITH NAMES
 ---------------
 To display the created menu as a grid of icons with its name at the bottom, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
---Options iconmenu-NN-name
+```--Options iconmenu-NN-name```
 
-NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type --Options iconmenu-03-name.
+NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type ```--Options iconmenu-03-name```
 
 <img width="572" height="239" alt="00c- EscritorioW-Cuadrícula-name" src="https://github.com/user-attachments/assets/5c231bab-3ca8-4bf5-8ffb-2be4ec4f4798" />
 
@@ -168,7 +168,7 @@ NN should be replaced with a number indicating the number of columns to display.
 --------------
 To display the created menu as a grid of two columns of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
---Options iconmenu-C2
+```--Options iconmenu-C2```
 
 If any icon in the main menu corresponds to a submenu, it will open to the right or left, depending on its location. If there are multiple levels of submenus, they will all open to the right or left, as appropriate.
 
@@ -178,16 +178,16 @@ If any icon in the main menu corresponds to a submenu, it will open to the right
 --------------
 To display a menu in dark mode, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
---dark-mode
+```--dark-mode```
 
 *Note:* All menu types support dark mode. At the end of the Target field, you should see:
 
---dark-mode for the default MENU WITH SUBMENU mode.
+```--dark-mode``` for the default MENU WITH SUBMENU mode
 
---Options iconmenu-NN --dark-mode for GRID mode.
+```--Options iconmenu-NN --dark-mode``` for GRID mode
 
---Options iconmenu-NN-name --dark-mode for NAMED GRID mode.
+```--Options iconmenu-NN-name --dark-mode``` for NAMED GRID mode
 
---Options iconmenu-C2 --dark-mode for DOUBLE COLUMN OF ICONS WITH SUBMENU mode.
+```--Options iconmenu-C2 --dark-mode``` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
 
 <img width="713" height="395" alt="16a- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/bcd29b63-0dbe-43f7-bc5b-761d377efbe5" />
