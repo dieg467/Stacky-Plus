@@ -8,8 +8,8 @@ This project is based on (1) Pawel Turlejski's original project (https://github.
 This fork expands Stacky with menu modes. All the changes in this fork were made using Artificial Intelligence and Visual Studio.
 There are 4 possible menu modes, all from the same .exe file:
 - MENU WITH SUBMENUS (default)
-- ICON GRID (no submenu)
-- ICON GRID WITH NAMES (no submenu)
+- ICON GRID
+- ICON GRID WITH NAMES
 - DOUBLE COLUMN OF ICONS WITH ICON SUBMENUS
 
 <img width="572" height="486" alt="00a- EscritorioW-Submenú" src="https://github.com/user-attachments/assets/731258f9-303e-44b7-8184-524778f3fd5f" />
@@ -39,7 +39,7 @@ Create a folder anywhere on your computer (on drive C, in My Documents, etc.), a
 
 <img width="609" height="333" alt="03-Multimedia" src="https://github.com/user-attachments/assets/cb5a86b7-d523-4f75-92d3-9666612bb41a" />
 
-This folder will then become a menu in the taskbar. If you create several folders, such as "Multimedia", "Documents", "System", etc., each one will become a separate menu in the taskbar, each with its own button. <br>
+This folder will later become a menu in the taskbar. If you create several folders, such as "Multimedia", "Documents", "System", etc., each one will become a separate menu in the taskbar, each with its own button. <br>
 *Note:* Each folder that will become a menu item does not need to be inside the STACKY PLUS container folder. It can be anywhere on your computer. It can even be a pre-existing folder that already contained shortcuts.
 
 **3) CREATING SUBFOLDERS** <br>
