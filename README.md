@@ -27,7 +27,7 @@ The .exe file can be downloaded from https://github.com/dieg467/Stacky-Plus/rele
 This application can be downloaded as an .exe file, but it does not need to be installed. There's no need to double-click the .exe file.
 The following steps explain how to create a menu on the taskbar.
 
-**1) CREATING THE CONTAINER FOLDER**. Create a folder anywhere on your computer (on drive C, in My Documents, etc.), and name it STACKY PLUS, for example. Place the Stacky.exe file and all the folders that will be created below inside it.
+**1) CREATING THE CONTAINER FOLDER**. Create a folder anywhere on your computer (on drive C, in My Documents, etc.), and name it STACKY PLUS, for example. Place inside the Stacky.exe file and all the folders that will be created below.
 
 **2) CREATING FOLDERS** <br>
 **a)** Inside the STACKY PLUS folder, create a folder to hold shortcuts. For example, you can create a "Multimedia" folder if you're going to place shortcuts related to music, videos, etc., there.
