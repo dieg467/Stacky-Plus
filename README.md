@@ -58,7 +58,7 @@ If you create several folders, such as "Multimedia," "Documents," "System," etc.
 
 If you want a menu to have submenus, you must create subfolders, as detailed below.
 
-**a)** Within the "Multimedia" or "Documents" folder, etc., create subfolders with the .submenu extension. For example, within the "Multimedia" folder, you can create the subfolders Music.submenu, Video.submenu, and so on. Within the "Documents" folder, you can create the subfolders "Word.submenu," "Excel.submenu," "Notes.submenu," etc.
+**a)** Within the "Multimedia" or "Documents" folder, etc., create subfolders with the ```.submenu``` extension. For example, within the "Multimedia" folder, you can create the subfolders ```Music.submenu```, ```Video.submenu```, and so on. Within the "Documents" folder, you can create the subfolders ```Word.submenu```, ```Excel.submenu```, ```Notes.submenu```, etc.
 
 <img width="655" height="392" alt="04-Submenú Multimedia" src="https://github.com/user-attachments/assets/35738909-c330-435c-a629-0cbf477bb6dd" />
 
