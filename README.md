@@ -27,7 +27,7 @@ As many as you want, and in any of the modes. Each one will have its own dedicat
 
 ### Download
 -------------
-The .exe file can be downloaded from Releases.
+The .exe file can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/Stacky-Plus
 
 ### STEPS TO FOLLOW
 ------------
