@@ -21,7 +21,10 @@ There are 4 possible menu modes, all from the same .exe file:
 As many as you want, and in any of the modes. Each one will have its own dedicated button on the taskbar.
 
 ## Download
-The .exe file can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/Stacky-Plus
+The stacky.exe file is 317 kB in size and can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/Stacky-Plus
+
+## Why is it so fast?
+Stacky-Plus stores the icons for all shortcuts in a small file within the corresponding folder. When the user opens a menu, Stacky-Plus accesses its cache immediately, without delay, at full speed.
 
 ## STEPS TO FOLLOW
 This application can be downloaded as an .exe file, but it does not need to be installed. There's no need to double-click the .exe file.
@@ -157,7 +160,7 @@ To display the created menu as a grid of two columns of icons with submenus, rig
 
 `--Options iconmenu-C2`
 
-For example, if you want the "Multimedia" folder to be displayed as a double column of icons with submenus, the Destination field should look similar to this:
+For example, if you want the "Multimedia" folder to be displayed as a double column of icons with submenus, the Target field should look similar to this:
 
 `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2`
 
@@ -171,14 +174,14 @@ To display a menu in dark mode, right-click on the corresponding shortcut, go to
 
 `--dark-mode`
 
-*Note:* All menu types support dark mode. At the end of the Target field, you should see:
+All menu types support dark mode. For example, if you want the "Multimedia" folder to be displayed as a dark mode menu, the Target field should look something like this:
 
-- `--dark-mode`for the default MENU WITH SUBMENU mode
+- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --dark-mode` for the default MENU WITH SUBMENU mode
 
-- `--Options iconmenu-NN --dark-mode` for GRID mode
+- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-NN --dark-mode` for GRID mode
 
-- `--Options iconmenu-NN-name --dark-mode` for NAMED GRID mode
+- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-NN-name --dark-mode` for NAMED GRID mode
 
-- `--Options iconmenu-C2 --dark-mode` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
+- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2 --dark-mode` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
 
 <img width="713" height="395" alt="16a- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/bcd29b63-0dbe-43f7-bc5b-761d377efbe5" />
