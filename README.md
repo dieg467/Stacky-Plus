@@ -43,8 +43,10 @@ This folder will later become a menu in the taskbar. If you create several folde
 
 **3) CREATING SUBFOLDERS** <br>
 If you want a menu to have submenus, you must create subfolders, as detailed below. <br>
-**a)** Inside the folder, create subfolders with the following extension:<br>
-`.submenu` <br>
+**a)** Inside the folder, create subfolders with the following extension:
+
+`.submenu`
+
 For example, for the "Multimedia" folder you can create the subfolders Music.submenu, Video.submenu, etc.
 
 <img width="655" height="392" alt="04-Submenú Multimedia" src="https://github.com/user-attachments/assets/35738909-c330-435c-a629-0cbf477bb6dd" />
@@ -55,8 +57,10 @@ You can create multiple levels of submenus by creating subfolders (with the .sub
 *Note:* The "Icon Grid" and "Named Icon Grid" modes do not support submenus.
 
 **4) CREATING SEPARATORS** <br>
-In the folder or subfolder where you want to create a separator (horizontal dividing line), create a .txt text file, give it a name, and change the .txt extension to the following: <br>
-`.separator`<br>
+In the folder or subfolder where you want to create a separator (horizontal dividing line), create a .txt text file, give it a name, and change the .txt extension to the following:
+
+`.separator`
+
 For example, it could be named aa.separator, Multimedia.separator, zz.separator, etc.
 
 <img width="655" height="423" alt="05- Separador" src="https://github.com/user-attachments/assets/e974381a-d901-47fa-8395-d6e05fbf8454" />
@@ -115,43 +119,49 @@ After any changes, clicking the button in the taskbar will open the menu without
 - **MODIFY MENU MODE**. If you change the menu mode, for example, from "Menu and Submenu" to "Grid" (or another mode), you must delete the existing button from the taskbar and create a new button by dragging the modified shortcut. This will update the changes.
 
 ## GRID MENU
-To display the menu as a grid of icons, right-click the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a space and add: <br>
-```--Options iconmenu-NN``` <br>
-NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type <br>
-```--Options iconmenu-03```
+To display the menu as a grid of icons, right-click the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a space and add:
+
+`--Options iconmenu-NN`
+
+NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type
+
+`--Options iconmenu-03`
 
 <img width="572" height="264" alt="00b- EscritorioW-Cuadrícula" src="https://github.com/user-attachments/assets/ab4a52c5-463d-4dc7-bf47-d6e84af2e99a" />
 
 ## GRID MENU WITH NAMES
-To display the created menu as a grid of icons with its name at the bottom, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add: <br>
-```--Options iconmenu-NN-name``` <br>
-NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type <br>
-```--Options iconmenu-03-name```
+To display the created menu as a grid of icons with its name at the bottom, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
+
+`--Options iconmenu-NN-name`
+
+NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type
+
+`--Options iconmenu-03-name`
 
 <img width="572" height="239" alt="00c- EscritorioW-Cuadrícula-name" src="https://github.com/user-attachments/assets/5c231bab-3ca8-4bf5-8ffb-2be4ec4f4798" />
 
 ## DOUBLE-COLUMN ICON MENU WITH SUBMENU <br>
-To display the created menu as a grid of two columns of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add: <br>
-```--Options iconmenu-C2``` <br>
+To display the created menu as a grid of two columns of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
+
+`--Options iconmenu-C2`
+
 If any icon in the main menu corresponds to a submenu, it will open to the right or left, depending on its location. If there are multiple levels of submenus, they will all open to the right or left, as appropriate.
 
 <img width="572" height="341" alt="00d- EscritorioW-2C" src="https://github.com/user-attachments/assets/38997391-c825-4fb7-afa2-1bac2fbb8044" />
 
 ## DARK MODE <br>
-To display a menu in dark mode, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add: <br>
-```--dark-mode```
+To display a menu in dark mode, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
-*Note:* All menu types support dark mode. At the end of the Target field, you should see: <br>
-```--dark-mode```<br>
-for the default MENU WITH SUBMENU mode
+`--dark-mode`
 
-```--Options iconmenu-NN --dark-mode```<br>
-for GRID mode
+*Note:* All menu types support dark mode. At the end of the Target field, you should see:
 
-```--Options iconmenu-NN-name --dark-mode``` <br>
-for NAMED GRID mode
+- `--dark-mode`for the default MENU WITH SUBMENU mode
 
-```--Options iconmenu-C2 --dark-mode``` <br>
-for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
+- `--Options iconmenu-NN --dark-mode` for GRID mode
+
+- `--Options iconmenu-NN-name --dark-mode` for NAMED GRID mode
+
+- `--Options iconmenu-C2 --dark-mode` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
 
 <img width="713" height="395" alt="16a- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/bcd29b63-0dbe-43f7-bc5b-761d377efbe5" />
