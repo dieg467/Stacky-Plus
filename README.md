@@ -127,6 +127,12 @@ NN should be replaced with a number indicating the number of columns to display.
 
 `--Options iconmenu-03`
 
+If you want the "Multimedia" folder to be displayed as a grid of icons, the Target field should look something like this:
+
+`"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-03`
+
+*Note:* In this menu mode, submenus and separators are not visible. Only the main menu shortcuts are shown.
+
 <img width="572" height="264" alt="00b- EscritorioW-Cuadrícula" src="https://github.com/user-attachments/assets/ab4a52c5-463d-4dc7-bf47-d6e84af2e99a" />
 
 ## GRID MENU WITH NAMES
@@ -138,6 +144,12 @@ NN should be replaced with a number indicating the number of columns to display.
 
 `--Options iconmenu-03-name`
 
+If you want the "Multimedia" folder to be displayed as a grid of named icons, the Target field should look something like this:
+
+`"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-03-name`
+
+*Note:* In this menu mode, submenus and separators are not visible. Only the main menu shortcuts are shown.
+
 <img width="572" height="239" alt="00c- EscritorioW-Cuadrícula-name" src="https://github.com/user-attachments/assets/5c231bab-3ca8-4bf5-8ffb-2be4ec4f4798" />
 
 ## DOUBLE-COLUMN ICON MENU WITH SUBMENU <br>
@@ -145,7 +157,12 @@ To display the created menu as a grid of two columns of icons with submenus, rig
 
 `--Options iconmenu-C2`
 
-If any icon in the main menu corresponds to a submenu, it will open to the right or left, depending on its location. If there are multiple levels of submenus, they will all open to the right or left, as appropriate.
+For example, if you want the "Multimedia" folder to be displayed as a double column of icons with submenus, the Destination field should look similar to this:
+
+`"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2`
+
+If any icon in the main menu corresponds to a submenu, it will open to the right or left, depending on its location. If there are multiple levels of submenus, they will all open to the right or left, as appropriate. <br>
+*Note:* In this menu mode, the separators are not visible.
 
 <img width="572" height="341" alt="00d- EscritorioW-2C" src="https://github.com/user-attachments/assets/38997391-c825-4fb7-afa2-1bac2fbb8044" />
 
