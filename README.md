@@ -21,7 +21,7 @@ There are 4 possible menu modes, all from the same .exe file:
 As many as you want, and in any of the modes. Each one will have its own dedicated button on the taskbar.
 
 ## Download
-The stacky.exe file is 317 kB in size and can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/Stacky-Plus
+The stacky.exe file is 342 kB in size and can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/Stacky-Plus
 
 ## Why is it so fast?
 Stacky-Plus stores the icons for all shortcuts in a small file within the corresponding folder. When the user opens a menu, Stacky-Plus accesses its cache immediately, without delay, at full speed.
@@ -115,6 +115,10 @@ The first time you open the menu, the icons may not be visible. In that case, cl
 By default, website shortcuts display the browser icon (Chrome, Edge, Firefox, etc.). The icon shown in the menu can be customized in two ways:
 - Automatically with the website's favicon. To do this, access the website by clicking the shortcut in the created menu. Most icons are supported.
 - With an icon stored on your computer, by accessing the properties of the corresponding shortcut.
+
+## Shortcuts to system files and hidden files
+System folders, such as Windows, Program Files, Program Files (x86), etc., are protected and have restricted access. The same applies to hidden folders, such as ProgramData, which contains shortcuts to all the applications visible in the Windows Start Menu. <br>
+If you want to create a menu made up of shortcuts to items located in system or hidden folders, it's recommended to create a folder inside the STACKY PLUS container folder. You could name it "SYSTEM," "APPLICATIONS," etc. Then, create (or copy) the shortcuts into this folder. This way, stacky.exe will not be restricted from displaying the icons correctly in the menu, and you'll be able to run the application or open the corresponding file.
 
 ## MENU MODIFICATIONS
 - **MODIFYING ELEMENTS**. Changes can be made to folders and subfolders, even after the menu button has been created. You can add or remove shortcuts from the menu or submenu, add or remove submenu folders, separators, etc.
