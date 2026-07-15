@@ -46,7 +46,7 @@ This folder will later become a menu in the taskbar. If you create several folde
 
 **3) CREATING SUBFOLDERS** <br>
 If you want a menu to have submenus, you must create subfolders, as detailed below. <br>
-**a)** Inside the folder, create subfolders with the following extension:
+**a)** Inside the folder, create subfolders with the following termination:
 
 `.submenu`
 
@@ -56,7 +56,7 @@ For example, for the "Multimedia" folder you can create the subfolders Music.sub
 
 **b)** Place shortcuts to files, folders, applications, web pages, etc., in each subfolder. Each subfolder will become a submenu.<br>
 Shortcuts located within a folder but outside of subfolders will be displayed in the main menu. <br>
-You can create multiple levels of submenus by creating subfolders (with the .submenu extension) within subfolders.<br>
+You can create multiple levels of submenus by creating subfolders (with the .submenu termination) within subfolders.<br>
 *Note:* The "Icon Grid" and "Named Icon Grid" modes do not support submenus.
 
 **4) CREATING SEPARATORS** <br>
