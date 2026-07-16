@@ -100,8 +100,9 @@ Subsequent items will be named %02%, %03%, etc. If an item does not have a prefi
 
 <img width="363" height="509" alt="12- Casilla Destino" src="https://github.com/user-attachments/assets/6308ad0c-1688-4058-9794-3d579680d652" />
 
-**f)** You can customize the shortcut icon by clicking "Change Icon" within Properties. This shortcut's icon will be the one that appears as the menu button on the Taskbar. <br>
 *Note:* If you have already completed this step, you can double-click the shortcut to open the created menu. The menu will open without icons. You must double-click it again to open the menu with icons. This allows you to verify that everything is correct before creating the button on the taskbar.
+
+**f)** You can customize the shortcut icon by clicking "Change Icon" within Properties. This shortcut's icon will be the one that appears as the menu button on the Taskbar. <br>
 
 **g)** Drag the shortcut to the taskbar and drop it in the desired position. This will create the menu button.
 
