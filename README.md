@@ -124,7 +124,11 @@ If you want to create a menu made up of shortcuts to items located in system or 
 ## MENU MODIFICATIONS
 - **MODIFYING ELEMENTS**. Changes can be made to folders and subfolders, even after the menu button has been created. You can add or remove shortcuts from the menu or submenu, add or remove submenu folders, separators, etc.
 After any changes, clicking the button in the taskbar will open the menu without icons. Clicking the button again will display the corresponding icons.
-- **MODIFY MENU MODE**. If you change the menu mode, for example, from "Menu and Submenu" to "Grid" (or another mode), you must delete the existing button from the taskbar and create a new button by dragging the modified shortcut. This will update the changes.
+- **MODIFYING MENU MODES AND FORMATS**
+Certain modifications require removing the button from the taskbar (unpinning it) and recreating it (dragging the modified shortcut to the taskbar). This applies the changes to the menu in the taskbar. This should be done when:
+    - *CHANGING THE MENU MODE*. For example, from Menu and Submenu mode to Icon Grid mode, or other modes.
+    - *CHANGING DARK MODE*. If you add or remove dark mode.
+    - *CHANGING THE NUMBER OF COLUMNS*. If you change the number of columns in Icon Grid or Named Icon Grid modes.
 
 ## GRID MENU
 To display the menu as a grid of icons, right-click the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a space and add:
