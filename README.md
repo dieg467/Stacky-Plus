@@ -129,6 +129,7 @@ Certain modifications require removing the button from the taskbar (unpinning it
     - *CHANGING THE MENU MODE*. For example, from Menu and Submenu mode to Icon Grid mode, or other modes.
     - *CHANGING DARK MODE*. If you add or remove dark mode.
     - *CHANGING THE NUMBER OF COLUMNS*. If you change the number of columns in Icon Grid or Named Icon Grid modes.
+    - *CHANGING THE ICON*. If you modify the icon of the shortcut that appears as a button in the taskbar.
 
 ## GRID MENU
 To display the menu as a grid of icons, right-click the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a space and add:
