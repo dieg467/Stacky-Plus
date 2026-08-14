@@ -63,11 +63,11 @@ Notes for this fork:
 How to use it
 -------------
 
-1. Create a regular windows shortcut to `stacky.exe`.
+1. Create a regular windows shortcut to `stacky-plus.exe`.
 2. Create a folder and put shortcuts to your programs there.
 3. Edit the shortcut and add the folder's path to the `Target` field, so it looks something like this:
 
-      `D:\pawel\Programs\Stacky\stacky.exe D:\pawel\Stacks\Games`
+      `D:\pawel\Programs\Stacky\stacky-plus.exe D:\pawel\Stacks\Games`
       
 4. Drag the stack shortcut to your taskbar.
 
@@ -78,7 +78,7 @@ Append options after the folder's path:
 - `--compact-header` Shows only the folder name for the top menu entry, instead of the full path.
 - `--dark-mode` Shows the menu in dark mode. Not fully supported though. The shadow still remains in light-mode.
 
-      `D:\pawel\Programs\Stacky\stacky.exe D:\pawel\Stacks\Games --compact-header --dark-mode`
+      `D:\pawel\Programs\Stacky\stacky-plus.exe D:\pawel\Stacks\Games --compact-header --dark-mode`
 
 That's all. You can click the Stacky shortcut on the taskbar to open the new stack.
 

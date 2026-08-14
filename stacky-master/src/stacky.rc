@@ -17,7 +17,7 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Tengi Design"
             VALUE "LegalCopyright",   STACKY_COPYRIGHT_STR
-            VALUE "OriginalFilename", "stacky.exe"
+            VALUE "OriginalFilename", "stacky-plus.exe"
             VALUE "ProductName",      "Stacky"
             VALUE "ProductVersion",   STACKY_VERSION_STR
         END

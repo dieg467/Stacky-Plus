@@ -1,1 +1,2 @@
-# stadky-master-1-5-2026 (Archivos-Proyecto)
+# stacky-plus
+
