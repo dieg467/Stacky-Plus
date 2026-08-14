@@ -41,7 +41,7 @@ typedef std::wstring            String;
 typedef std::vector<String>     StringList;
 
 const String CACHE_FILE_NAME = L"!stacky.cache";
-const String STACKY_EXEC_NAME = L"stacky.exe";
+const String STACKY_EXEC_NAME = L"stacky-plus.exe";
 const Char* STACKY_WINDOW_NAME = L"stacky";
 const Char* STACKY_POPUP_CLASS = L"stacky_popup";
 const Char* STACKY_GRID_CLASS  = L"stacky_grid";
@@ -72,6 +72,9 @@ enum GridMode {
 	GRID_ICON    = 1,  // NN cols, icons only, tooltip immediately
 	GRID_NAME    = 2,  // NN cols, icons + truncated name below, tooltip 300 ms
 	GRID_CASCADE = 3,  // 2 cols, icons only, submenus open as 1-col grid
+	GRID_CASCADE_NAME = 4,  // 2 cols, icons + truncated name below, submenus open as 1-col grid with names
+	GRID_F2 = 5,  // row-based: items with submenu on row 1, others on row 2; submenus open upward
+	GRID_F2_NAME = 6,  // same as GRID_F2, with truncated name below each icon
 };
 
 // Timer IDs used by PopupWndProc
@@ -199,7 +202,7 @@ struct Util {
 					::CloseHandle(hOtherStacky);
 				}
 				else {
-					Util::msg(L"Failed to open another stacky.exe process. Kill stacky.exe manually.");
+					Util::msg(L"Failed to open another stacky-plus.exe process. Kill stacky-plus.exe manually.");
 				}
 			}
 		} while (found);
@@ -1415,6 +1418,7 @@ struct App {
 		}
 		compact_header = options.find(L"--compact-header") != String::npos;
 		dark_mode = options.find(L"--dark-mode") != String::npos;
+		mouse_position = options.find(L"--mouseposition") != String::npos;
 
 		// Parse iconmenu-NN / iconmenu-NN-name / iconmenu-C2
 		grid_mode = GRID_NONE;
@@ -1423,8 +1427,21 @@ struct App {
 		if (im != String::npos) {
 			const wchar_t* p = options.c_str() + im + 9; // skip "iconmenu-"
 			if (p[0] == L'C' || p[0] == L'c') {
-				// iconmenu-C2 (cascade mode, always 2 cols)
-				grid_mode = GRID_CASCADE;
+				// iconmenu-C2 (cascade mode, always 2 cols) / iconmenu-C2-name (cascade + names)
+				const wchar_t* afterC = p + 2; // skip "C2"
+				if (wcsncmp(afterC, L"-name", 5) == 0)
+					grid_mode = GRID_CASCADE_NAME;
+				else
+					grid_mode = GRID_CASCADE;
+				icon_cols = 2;
+			} else if (p[0] == L'F' || p[0] == L'f') {
+				// iconmenu-F2: row-based layout, submenu items on row 1, others on row 2
+				// iconmenu-F2-name: same, with truncated name below each icon
+				const wchar_t* afterF = p + 2; // skip "F2"
+				if (wcsncmp(afterF, L"-name", 5) == 0)
+					grid_mode = GRID_F2_NAME;
+				else
+					grid_mode = GRID_F2;
 				icon_cols = 2;
 			} else {
 				wchar_t* end = nullptr;
@@ -1524,6 +1541,7 @@ private:
 	HWND    window;
 	bool    hide_header;
 	bool    compact_header;
+	bool    mouse_position;
 
 	// helper: make a display label for the base folder
 	const String header_label() {
@@ -1545,6 +1563,27 @@ private:
 	// Calculate optimal menu position above the Stacky taskbar icon.
 	// Centers the menu horizontally over the cursor (= icon center at launch time).
 	void CalculateMenuPosition(int& out_x, int& out_y, int menuWidth, int menuHeight) {
+		if (mouse_position) {
+			// --mouseposition: open the menu at the current mouse cursor position
+			// (top-left corner of the menu at the cursor), clamped to the work area.
+			POINT cursor{};
+			GetCursorPos(&cursor);
+			HMONITOR hMonitor = ::MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+			RECT workArea = Util::GetWorkAreaForMonitor(hMonitor);
+
+			int menuX = cursor.x;
+			int menuY = cursor.y;
+
+			if (menuX < workArea.left) menuX = workArea.left;
+			if (menuX + menuWidth > workArea.right) menuX = workArea.right - menuWidth;
+			if (menuY < workArea.top) menuY = workArea.top;
+			if (menuY + menuHeight > workArea.bottom) menuY = workArea.bottom - menuHeight;
+
+			out_x = menuX;
+			out_y = menuY;
+			return;
+		}
+
 		RECT taskbarRect = Util::GetTaskbarRect();
 
 		HMONITOR hMonitor = ::MonitorFromRect(&taskbarRect, MONITOR_DEFAULTTOPRIMARY);
@@ -1714,12 +1753,41 @@ public:
 				if (rel.empty()) continue;
 				if (rel.find(DIR_SEP) != String::npos) continue;
 			}
-			if (IsSeparatorFile(ci.name)) continue;
-			if (ci.is_submenu && grid_mode != GRID_CASCADE) continue;
-			v.push_back(i);
-		}
-		return v;
-	}
+				if (IsSeparatorFile(ci.name)) continue;
+					if (ci.is_submenu && grid_mode != GRID_CASCADE && grid_mode != GRID_CASCADE_NAME && grid_mode != GRID_F2 && grid_mode != GRID_F2_NAME) continue;
+					v.push_back(i);
+				}
+				if (grid_mode == GRID_F2 || grid_mode == GRID_F2_NAME) {
+					std::vector<size_t> withSub, withoutSub;
+					for (auto idx : v) {
+						if (cache->items[idx].is_submenu) withSub.push_back(idx);
+						else withoutSub.push_back(idx);
+					}
+					v.clear();
+					v.insert(v.end(), withSub.begin(), withSub.end());
+					v.insert(v.end(), withoutSub.begin(), withoutSub.end());
+				} else if ((grid_mode == GRID_CASCADE || grid_mode == GRID_CASCADE_NAME) && !isRoot) {
+					// Submenu (non-root): when the multi-column layout applies (n > 2 items,
+					// mixed submenu/plain items, not all items being submenus), group all
+					// submenu items first so GridCellPos can place them (plus enough leading
+					// plain items to pad the column to full height) in a single column,
+					// matching MeasureGridSize's grouping condition.
+					int n = (int)v.size();
+					int subCount = 0;
+					for (auto idx : v) if (cache->items[idx].is_submenu) subCount++;
+					if (n > 2 && subCount > 0 && subCount < n) {
+						std::vector<size_t> withSub, withoutSub;
+						for (auto idx : v) {
+							if (cache->items[idx].is_submenu) withSub.push_back(idx);
+							else withoutSub.push_back(idx);
+						}
+						v.clear();
+						v.insert(v.end(), withSub.begin(), withSub.end());
+						v.insert(v.end(), withoutSub.begin(), withoutSub.end());
+					}
+				}
+				return v;
+			}
 
 	struct GridMetrics {
 		int cellSz;   // icon-area side = iconSz + cellPad*2
@@ -1730,6 +1798,12 @@ public:
 		int rows;
 		int totalW;
 		int totalH;
+		int f2Row1Count; // GRID_F2 only: number of items placed in row 1 (submenu items).
+						 // Also reused for GRID_CASCADE/GRID_CASCADE_NAME submenus in
+						 // subTwoCol mode: number of items placed in the submenu column.
+		int topPad;      // GRID_F2 only: extra space reserved above row 0 for the upward submenu triangle
+		bool subTwoCol;  // GRID_CASCADE/GRID_CASCADE_NAME submenus only: laid out in 2 columns
+					 // (submenu items grouped in one column, plain items in the other)
 	};
 
 	// Measure grid for a given prefix (root = empty).
@@ -1738,12 +1812,89 @@ public:
 		int iconSz  = MulDiv(32, dpi, 96);
 		int cellPad = MulDiv(8,  dpi, 96);
 		int cellSz  = iconSz + cellPad * 2;
-		int labelH  = (grid_mode == GRID_NAME) ? MulDiv(16, dpi, 96) : 0;
+		int labelH  = (grid_mode == GRID_NAME || grid_mode == GRID_CASCADE_NAME || grid_mode == GRID_F2_NAME) ? MulDiv(16, dpi, 96) : 0;
 		int cellH   = cellSz + labelH;
-		int cols    = icon_cols;
-		int n       = (int)GridItems(prefix).size();
-		int rows    = n > 0 ? (n + cols - 1) / cols : 1;
-		return { cellSz, cellPad, labelH, cellH, cols, rows, cellSz * cols, cellH * rows };
+		auto its    = GridItems(prefix);
+		int n       = (int)its.size();
+		int cols, rows, f2Row1Count;
+		bool subTwoCol = false;
+		if ((grid_mode == GRID_CASCADE || grid_mode == GRID_CASCADE_NAME) && !prefix.empty()) {
+			// Submenu (non-root) layout:
+			// - 2 items, or all items have a submenu -> single column.
+			// - No items have a submenu -> plain 2-column grid (column-major wrapping).
+			// - 3+ items with a mix of submenu/plain items -> 2 or more columns, with all
+			//   submenu items (plus enough plain items to pad the column to full height)
+			//   grouped into a single column placed on the side the submenu opens towards
+			//   (decided later in GridCellPos via openRight). Aim for a roughly square
+			//   arrangement to minimize empty cells.
+			// Submenu (non-root) layout:
+			// - 1 item -> single row, single column.
+			// - 2 items, or all items have a submenu -> single column.
+			// - No items have a submenu -> plain 2-column grid (column-major wrapping).
+			// - 3+ items with a mix of submenu/plain items -> exactly 2 columns, with all
+			//   submenu items (plus enough plain items to pad the column, minimizing empty
+			//   cells) grouped into a single column placed on the side the submenu opens
+			//   towards (decided later in GridCellPos via openRight).
+			int subCount = 0;
+			for (auto idx : its) if (cache->items[idx].is_submenu) subCount++;
+			int nonSubCount = n - subCount;
+			if (n <= 1) {
+				// A single item never needs more than one column.
+				cols        = 1;
+				rows        = n > 0 ? n : 1;
+				f2Row1Count = 0;
+			} else if (n == 2 || subCount == n) {
+				// 2 items (regardless of submenu status), or all items have a submenu.
+				cols        = 1;
+				rows        = n;
+				f2Row1Count = 0;
+			} else if (subCount == 0) {
+				cols        = 2;
+				rows        = (n + cols - 1) / cols;
+				f2Row1Count = 0;
+			} else {
+				subTwoCol = true;
+				cols = 2;
+				// Submenu column must hold all subCount items; use the minimal row
+				// count that fits all n items in exactly 2 columns, but never less
+				// than subCount (the submenu column cannot overflow into a 3rd column).
+				int minRowsFor2Cols = (n + 1) / 2; // ceil(n/2)
+				rows = max(subCount, minRowsFor2Cols);
+				f2Row1Count = rows; // submenu column height: subs + filler plain items
+			}
+		} else if (grid_mode == GRID_F2 || grid_mode == GRID_F2_NAME) {
+			int subCount = 0;
+			for (auto idx : its) if (cache->items[idx].is_submenu) subCount++;
+			int nonSubCount = n - subCount;
+			// Single row if <=3 items, or if all items have a submenu (never put a
+			// submenu item on row 2). Having zero submenu items does NOT force a
+			// single row - with >=4 plain items we still want 2 rows.
+			bool singleRow = (n <= 3) || (subCount == n && n > 0);
+			if (singleRow) {
+				cols = n > 0 ? n : 1;
+				rows = 1;
+				f2Row1Count = n;
+			} else if (subCount >= nonSubCount) {
+				// Submenu items (row 1) are at least as many as plain items (row 2).
+				cols = subCount;
+				rows = 2;
+				f2Row1Count = subCount;
+			} else {
+				// Plain items outnumber submenu items: move some plain items into row 1
+				// (alongside all submenu items, which always come first) to balance the
+				// two rows and reduce the number of columns. All submenu items still end
+				// up in row 1 because GridItems() places them first and f2Row1Count >= subCount.
+				f2Row1Count = (n + 1) / 2; // ceil(n/2), always >= subCount since subCount < n/2
+				cols = max(f2Row1Count, n - f2Row1Count);
+				rows = 2;
+			}
+		} else {
+			cols = icon_cols;
+			rows = n > 0 ? (n + cols - 1) / cols : 1;
+			f2Row1Count = cols; // unused outside GRID_F2
+		}
+		int topPad = 0; // GRID_F2 no longer reserves extra space; triangle is drawn inside the cell.
+		return { cellSz, cellPad, labelH, cellH, cols, rows, cellSz * cols, cellH * rows + topPad, f2Row1Count, topPad, subTwoCol };
 	}
 
 	// Create params passed to GridWndProc for both root and submenu grids.
@@ -2687,6 +2838,11 @@ struct GridState {
     int       labelH;
     int       cols;
     int       rows;
+    int       f2Row1Count;  // GRID_F2 only: number of items in row 1 (submenu items).
+                            // Also reused for GRID_CASCADE/GRID_CASCADE_NAME submenus in
+                            // subTwoCol mode: number of items in the submenu column.
+    int       topPad;       // GRID_F2 only: space reserved above row 0 for upward triangle
+    bool      subTwoCol;    // GRID_CASCADE/GRID_CASCADE_NAME submenus only: 2-column layout
     // hover
     int       hotCell;
     bool      trackingMouse;
@@ -2723,6 +2879,38 @@ static String GridDisplayName(const String& name, const String& prefix) {
     return s;
 }
 
+// Helper: compute (col,row) for a given item index according to grid layout.
+// For GRID_F2, row 1 (row==0) holds the items with a submenu (the first f2Row1Count
+// items, since GridItems() already reorders them to the front); row 2 (row==1) holds
+// the rest. For GRID_CASCADE/GRID_CASCADE_NAME submenus in subTwoCol mode, the first
+// f2Row1Count items (all submenu items, plus enough plain items to pad the column,
+// since GridItems() groups them first) go into a single column placed on the side the
+// submenu opens towards (openRight); the remaining plain items fill the other
+// column(s) in column-major order. Other modes use plain column-major wrapping.
+static void GridCellPos(GridState* gs, int idx, int& col, int& row) {
+    if (gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME) {
+        if (idx < gs->f2Row1Count) { row = 0; col = idx; }
+        else                       { row = 1; col = idx - gs->f2Row1Count; }
+    } else if (gs->subTwoCol) {
+        // openRight > 0 -> submenu opens to the right -> submenu column is the
+        // rightmost column; openRight <= 0 -> submenu column is the leftmost column.
+        int subCol = (gs->openRight > 0) ? (gs->cols - 1) : 0;
+        if (idx < gs->f2Row1Count) {
+            col = subCol;
+            row = idx;
+        } else {
+            int rem = idx - gs->f2Row1Count;
+            int colInRem = rem / gs->f2Row1Count;
+            row = rem % gs->f2Row1Count;
+            // Fill the remaining columns, skipping over the submenu column.
+            col = (subCol == 0) ? (colInRem + 1) : colInRem;
+        }
+    } else {
+        col = idx % gs->cols;
+        row = idx / gs->cols;
+    }
+}
+
 // Helper: show or hide a tooltip for the grid
 static void GridShowTip(HWND hwnd, GridState* gs, int cellIdx) {
     if (gs->tipHwnd && IsWindow(gs->tipHwnd)) {
@@ -2746,13 +2934,13 @@ static void GridShowTip(HWND hwnd, GridState* gs, int cellIdx) {
     SelectObject(measDC, oldF); DeleteObject(fnt); ReleaseDC(hwnd, measDC);
 
     int tipW = ts.cx + 10, tipH = ts.cy + 6;
-    int col = cellIdx % gs->cols;
-    int row = cellIdx / gs->cols;
+    int col, row;
+    GridCellPos(gs, cellIdx, col, row);
     POINT origin = {0,0}; ClientToScreen(hwnd, &origin);
     int tipX = origin.x + col * gs->cellSz + gs->cellSz/2 - tipW/2;
-    int tipY = origin.y + row * gs->cellH - tipH - 2;
+    int tipY = origin.y + gs->topPad + row * gs->cellH - tipH - 2;
     // if above screen, place below icon
-    if (tipY < 0) tipY = origin.y + row * gs->cellH + gs->cellSz + 2;
+    if (tipY < 0) tipY = origin.y + gs->topPad + row * gs->cellH + gs->cellSz + 2;
 
     wcsncpy_s(g_tipData.label, label.c_str(), 511);
     g_tipData.dark = gs->dark_mode;
@@ -2770,7 +2958,9 @@ static void GridShowTip(HWND hwnd, GridState* gs, int cellIdx) {
     }
 }
 
-// Helper: open a 1-column sub-grid for a submenu item (GRID_CASCADE)
+// Helper: open a sub-grid for a submenu item.
+// GRID_CASCADE / GRID_CASCADE_NAME: single-column sub-grid opening left/right.
+// GRID_F2: row-based sub-grid (same layout rules as the main grid) opening upward.
 static void GridOpenSubChild(HWND hwnd, GridState* gs, int cellIdx) {
     auto items = gs->app->GridItems(gs->prefix);
     if (cellIdx < 0 || cellIdx >= (int)items.size()) return;
@@ -2778,21 +2968,55 @@ static void GridOpenSubChild(HWND hwnd, GridState* gs, int cellIdx) {
     if (!ci.is_submenu) return;
 
     String childPrefix = ci.name + DIR_SEP;
+
+    if (gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME) {
+        auto gm = gs->app->MeasureGridSize(childPrefix);
+        if (gm.totalW <= 0 || gm.totalH <= 0) return;
+        int subN = (int)gs->app->GridItems(childPrefix).size();
+        if (subN == 0) return;
+
+        int col, row;
+        GridCellPos(gs, cellIdx, col, row);
+        RECT wr; GetWindowRect(hwnd, &wr);
+        POINT origin = {0, 0}; ClientToScreen(hwnd, &origin);
+        int cx = origin.x + col * gs->cellSz;
+        int cy = origin.y + gs->topPad + row * gs->cellH; // top of the cell that owns the submenu
+
+        HMONITOR hMon = MonitorFromRect(&wr, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi{sizeof(mi)}; GetMonitorInfo(hMon, &mi);
+
+        // Always open upward: bottom of sub-grid touches top of the cell.
+        int subY = cy - gm.totalH;
+        if (subY < mi.rcWork.top) subY = mi.rcWork.top;
+
+        // Clamp horizontally within work area.
+        int subX = cx;
+        if (subX + gm.totalW > mi.rcWork.right) subX = mi.rcWork.right - gm.totalW;
+        if (subX < mi.rcWork.left) subX = mi.rcWork.left;
+
+        auto* cp = new App::GridCreateParams{ gs->app, childPrefix, hwnd, gs->openRight };
+        HWND child = CreateWindowEx(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+            STACKY_GRID_CLASS, L"", WS_POPUP | WS_BORDER,
+            subX, subY, gm.totalW, gm.totalH,
+            nullptr, nullptr, GetModuleHandle(nullptr), cp);
+        if (!child) { delete cp; return; }
+        Util::SetWindowRoundedCorners(child);
+        ShowWindow(child, SW_SHOWNOACTIVATE);
+        UpdateWindow(child);
+        gs->subChild   = child;
+        gs->hotSubCell = cellIdx;
+        return;
+    }
+
     UINT dpi = GetDpiForWindow(hwnd);
-    int iconSz  = MulDiv(32, dpi, 96);
-    int cellPad = MulDiv(8,  dpi, 96);
-    int cSz     = iconSz + cellPad*2;
-    int subN    = (int)gs->app->GridItems(childPrefix).size();
-    int subW    = cSz;
-    int subH    = cSz * subN;
-    if (subN == 0) return;
 
     // Determine preferred open direction:
     // - Root grid (no parent): column of cellIdx in the 2-col root decides direction.
     // - Sub-grid: inherit the direction already established by the root column.
     int openRight;
     if (gs->parentHwnd == nullptr) {
-        // Root grid: col 0 (left column) ? open submenu to the left; col 1 (right) ? right.
+        // Root grid: col 0 (left column) -> open submenu to the left; col 1 (right) -> right.
         int col = cellIdx % gs->cols;
         openRight = (col == 0) ? -1 : +1;
     } else {
@@ -2800,10 +3024,21 @@ static void GridOpenSubChild(HWND hwnd, GridState* gs, int cellIdx) {
         openRight = gs->openRight;
     }
 
-    int row = cellIdx / gs->cols;
+    // Measure the submenu (handles the plain 1-column layout as well as the
+    // 2-column layout used when plain items outnumber submenu items).
+    auto gm = gs->app->MeasureGridSize(childPrefix);
+    int subN = (int)gs->app->GridItems(childPrefix).size();
+    if (subN == 0 || gm.totalW <= 0 || gm.totalH <= 0) return;
+    int subW = gm.totalW;
+    int subH = gm.totalH;
+
+    int col, row;
+    GridCellPos(gs, cellIdx, col, row);
     RECT wr; GetWindowRect(hwnd, &wr);
     POINT origin = {0, 0}; ClientToScreen(hwnd, &origin);
-    int cy = origin.y + row * gs->cellH;
+    int rowTop    = origin.y + gs->topPad + row * gs->cellH;       // top of the row that owns the submenu item
+    int rowBottom = rowTop + gs->cellH;                            // bottom of that same row
+    int cy = rowTop; // default: child's top row touches the top of the parent's row
 
     // Get work area to check available space
     HMONITOR hMon = MonitorFromRect(&wr, MONITOR_DEFAULTTONEAREST);
@@ -2824,7 +3059,16 @@ static void GridOpenSubChild(HWND hwnd, GridState* gs, int cellIdx) {
             cx = wr.right;
     }
 
-    // Clamp vertically
+    // If top-aligning the child to the parent row overflows the bottom of the
+    // work area (typically because the row is the last one in the parent),
+    // anchor to the bottom of the parent's row instead: the child's bottom row
+    // then touches the bottom edge of the parent's row, keeping contact
+    // between the two instead of opening a row higher with a gap.
+    if (cy + subH > mi.rcWork.bottom) {
+        cy = rowBottom - subH;
+    }
+    // Final safety clamp in case neither anchor fits the work area at all
+    // (e.g. submenu taller than the available work area).
     if (cy + subH > mi.rcWork.bottom) cy = mi.rcWork.bottom - subH;
     if (cy < mi.rcWork.top)           cy = mi.rcWork.top;
 
@@ -2907,8 +3151,10 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         auto* cs = (CREATESTRUCT*)lParam;
         auto* cp = (App::GridCreateParams*)cs->lpCreateParams;
         auto  gm  = cp->app->MeasureGridSize(cp->prefix);
-        // For GRID_CASCADE sub-grids force 1 column
-        int cols = cp->prefix.empty() ? gm.cols : 1;
+        // For GRID_CASCADE/GRID_CASCADE_NAME sub-grids use gm.cols whenever it computed
+        // a multi-column layout (subTwoCol, or an all-plain-items submenu now laid out
+        // as 2 columns); otherwise force 1 column. GRID_F2 sub-grids always use gm.cols.
+        int cols = (cp->prefix.empty() || cp->app->grid_mode == GRID_F2 || cp->app->grid_mode == GRID_F2_NAME || gm.cols > 1) ? gm.cols : 1;
         auto* gs  = new GridState{};
         gs->app           = cp->app;
         gs->prefix        = cp->prefix;
@@ -2919,6 +3165,9 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         gs->labelH        = gm.labelH;
         gs->cols          = cols;
         gs->rows          = gm.rows;
+        gs->f2Row1Count   = gm.f2Row1Count;
+        gs->topPad        = gm.topPad;
+        gs->subTwoCol     = gm.subTwoCol;
         gs->hotCell       = -1;
         gs->tipHwnd       = nullptr;
         gs->trackingMouse = false;
@@ -2992,17 +3241,17 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
         // Prepare label font (used for GRID_NAME and also submenu arrow)
         HFONT labelFnt = nullptr;
-        if (gs->grid_mode == GRID_NAME || gs->grid_mode == GRID_CASCADE) {
+        if (gs->grid_mode == GRID_NAME || gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2_NAME) {
             LOGFONT lf{}; lf.lfHeight = -MulDiv(9, dpi, 96); lf.lfWeight = FW_NORMAL;
             wcscpy_s(lf.lfFaceName, L"Segoe UI");
             labelFnt = CreateFontIndirect(&lf);
         }
 
         for (int i = 0; i < (int)items.size(); ++i) {
-            int col = i % gs->cols;
-            int row = i / gs->cols;
+            int col, row;
+            GridCellPos(gs, i, col, row);
             int x = col * sz;
-            int y = row * cH;
+            int y = gs->topPad + row * cH;
             RECT cell = { x, y, x + sz, y + sz };
 
             // hover highlight (icon area)
@@ -3023,8 +3272,8 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             AlphaBlend(memDC, ox, oy, drawSz, drawSz, tmpDC, 0, 0, ic.sz.cx, ic.sz.cy, bf);
             SelectObject(tmpDC, oldTmp); DeleteDC(tmpDC);
 
-            // draw label below icon (GRID_NAME mode)
-            if (gs->grid_mode == GRID_NAME && gs->labelH > 0 && labelFnt) {
+            // draw label below icon (GRID_NAME / GRID_CASCADE_NAME / GRID_F2_NAME modes)
+            if ((gs->grid_mode == GRID_NAME || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2_NAME) && gs->labelH > 0 && labelFnt) {
                 String disp = GridDisplayName(ci.name, gs->prefix);
                 HFONT oldF = (HFONT)SelectObject(memDC, labelFnt);
                 SetTextColor(memDC, labelFg);
@@ -3032,7 +3281,9 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 // Measure width of 'a' as lateral margin
                 SIZE aSz{}; GetTextExtentPoint32(memDC, L"a", 1, &aSz);
                 int margin = aSz.cx;
-                RECT lr = { x + margin, y + sz, x + sz - margin, y + cH };
+                // Start the label rect right at the icon's bottom edge (removing the
+                // cell's own bottom padding, so there is no empty gap above the name).
+                RECT lr = { x + margin, y + sz - iPad, x + sz - margin, y + cH };
                 // Truncate text to fit without ellipsis: clip word by word then char by char
                 int availW = lr.right - lr.left;
                 String truncated = disp;
@@ -3047,8 +3298,8 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 SelectObject(memDC, oldF);
             }
 
-            // draw small submenu indicator for GRID_CASCADE submenu items
-            if (gs->grid_mode == GRID_CASCADE && ci.is_submenu) {
+            // draw small submenu indicator for GRID_CASCADE / GRID_CASCADE_NAME submenu items
+            if ((gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME) && ci.is_submenu) {
                 int ts      = MulDiv(6, dpi, 96);  // triangle size
                 int margin  = iPad / 2;
                 int gap2mm  = MulDiv(2 * 96, dpi, 96 * 25);  // 2mm in pixels at current DPI
@@ -3080,6 +3331,32 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 SelectObject(memDC, ob); SelectObject(memDC, op);
                 DeleteObject(arBr); DeleteObject(arPn);
             }
+
+            // draw upward-pointing submenu indicator for GRID_F2 submenu items, placed
+            // in the top padding strip of the cell (inside the active/click area) so it
+            // never overlaps the icon itself. Submenus in GRID_F2 always open upward.
+            if ((gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME) && ci.is_submenu) {
+                int ts      = min(MulDiv(6, dpi, 96), iPad - MulDiv(1, dpi, 96));
+                if (ts < MulDiv(3, dpi, 96)) ts = MulDiv(3, dpi, 96); // keep a minimum visible size
+                int tx_mid  = x + sz / 2;  // horizontally centred over the icon
+                COLORREF arrowClr = dm ? RGB(180,180,180) : RGB(80,80,80);
+                // Centre the triangle within the top padding strip (y .. y+iPad), which sits
+                // above the icon (icon starts at y+iPad) - no overlap with the icon.
+                int ty = y + (iPad - ts) / 2;
+                if (ty < y) ty = y;
+                POINT tri[3] = {
+                    { tx_mid - ts/2, ty + ts },
+                    { tx_mid + ts/2, ty + ts },
+                    { tx_mid,        ty      },
+                };
+                HBRUSH arBr = CreateSolidBrush(arrowClr);
+                HPEN   arPn = CreatePen(PS_NULL, 0, arrowClr);
+                HGDIOBJ ob = SelectObject(memDC, arBr);
+                HGDIOBJ op = SelectObject(memDC, arPn);
+                Polygon(memDC, tri, 3);
+                SelectObject(memDC, ob); SelectObject(memDC, op);
+                DeleteObject(arBr); DeleteObject(arPn);
+            }
         }
         if (labelFnt) DeleteObject(labelFnt);
         BitBlt(dc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
@@ -3101,10 +3378,10 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         auto items = gs->app->GridItems(gs->prefix);
         int newHot = -1;
         for (int i = 0; i < (int)items.size(); ++i) {
-            int col = i % gs->cols;
-            int row = i / gs->cols;
-            RECT cell = { col*gs->cellSz, row*gs->cellH,
-                          col*gs->cellSz + gs->cellSz, row*gs->cellH + gs->cellSz };
+            int col, row;
+            GridCellPos(gs, i, col, row);
+            RECT cell = { col*gs->cellSz, gs->topPad + row*gs->cellH,
+                          col*gs->cellSz + gs->cellSz, gs->topPad + row*gs->cellH + gs->cellSz };
             if (PtInRect(&cell, pt)) { newHot = i; break; }
         }
 
@@ -3119,15 +3396,15 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
 
             if (newHot >= 0) {
-                bool isSubmenu = (gs->grid_mode == GRID_CASCADE) &&
+                bool isSubmenu = (gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME) &&
                     newHot < (int)items.size() &&
                     gs->app->cache->items[items[newHot]].is_submenu;
 
                 // 500 ms delay before showing tooltip for all modes
                 SetTimer(hwnd, GRID_TIMER_SHOW, 1000, nullptr);
 
-                // GRID_CASCADE: manage sub-grid on hover
-                if (gs->grid_mode == GRID_CASCADE) {
+                // GRID_CASCADE / GRID_CASCADE_NAME / GRID_F2 / GRID_F2_NAME: manage sub-grid on hover
+                if (gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME) {
                     // Cancel any pending close
                     if (gs->subClosePending) {
                         gs->subClosePending = false;
@@ -3151,7 +3428,7 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 }
             } else {
                 // No cell
-                if (gs->grid_mode == GRID_CASCADE && gs->subChild && IsWindow(gs->subChild)) {
+                if ((gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME) && gs->subChild && IsWindow(gs->subChild)) {
                     gs->subClosePending = true;
                     SetTimer(hwnd, GRID_TIMER_SUBCL, 150, nullptr);
                 }
@@ -3170,7 +3447,7 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (gs->tipHwnd && IsWindow(gs->tipHwnd)) {
                 DestroyWindow(gs->tipHwnd); gs->tipHwnd = nullptr;
             }
-            if (gs->grid_mode == GRID_CASCADE && gs->subChild && IsWindow(gs->subChild)) {
+            if ((gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME) && gs->subChild && IsWindow(gs->subChild)) {
                 // Grace period - cursor may be entering sub-grid
                 gs->subClosePending = true;
                 SetTimer(hwnd, GRID_TIMER_SUBCL, 150, nullptr);
@@ -3219,13 +3496,13 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         auto items = gs->app->GridItems(gs->prefix);
         for (int i = 0; i < (int)items.size(); ++i) {
-            int col = i % gs->cols;
-            int row = i / gs->cols;
-            RECT cell = { col*gs->cellSz, row*gs->cellH,
-                          col*gs->cellSz + gs->cellSz, row*gs->cellH + gs->cellSz };
+            int col, row;
+            GridCellPos(gs, i, col, row);
+            RECT cell = { col*gs->cellSz, gs->topPad + row*gs->cellH,
+                          col*gs->cellSz + gs->cellSz, gs->topPad + row*gs->cellH + gs->cellSz };
             if (PtInRect(&cell, pt)) {
                 auto& ci = gs->app->cache->items[items[i]];
-                if (ci.is_submenu && gs->grid_mode == GRID_CASCADE) {
+                if (ci.is_submenu && (gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME)) {
                     // toggle sub-grid
                     if (gs->subChild && IsWindow(gs->subChild) && gs->hotSubCell == i) {
                         DestroyWindow(gs->subChild);
@@ -3301,7 +3578,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPTSTR cmd_line, int) {
 		Util::msgt(
 			err_title + L"Parameter missing",
 			L"Pass path to the stack folder in the command line, for ex.: \n\n"
-			L"        stacky.exe D:\\Projects [options]\n\n"
+			L"        stacky-plus.exe D:\\Projects [options]\n\n"
 			L"Options:\n"
 			L"  --hide-shortcuts-folder  Hide the shortcuts folder item (base folder) and separator\n"
 			L"  --hide-header            (deprecated: use --hide-shortcuts-folder)\n"
