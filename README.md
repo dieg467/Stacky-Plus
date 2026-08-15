@@ -72,8 +72,10 @@ For example, it could be named aa.separator, Multimedia.separator, zz.separator,
 You can create multiple separators within the same menu or submenu. The position of a separator depends on its name, as they are ordered alphabetically.<br>
 
 **5) ORDERING ITEMS** <br>
+- **Predetermined**<br>
 By default, items (folder, subfolder, shortcut, separator) are sorted alphabetically, and will be sorted accordingly in the corresponding menu or submenu. <br>
-However, if you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The %01% prefix will not be displayed in the menu. <br>
+- **PERSONALIZED** <br>
+If you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The %01% prefix will not be displayed in the menu. <br>
 Subsequent items will be named %02%, %03%, etc. If an item does not have a prefix, it will be sorted alphabetically.
 
 <img width="752" height="423" alt="06a- Ordenamiento" src="https://github.com/user-attachments/assets/02dfcbc5-fb3a-43a5-b2b1-dea9af488771" />
