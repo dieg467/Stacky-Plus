@@ -6,10 +6,10 @@ Clau-Bucur's fork (https://github.com/clau-bucur/stacky)
 
 ## Description 
 There are 4 possible menu modes, all accessible from the same .exe file:
-- MENU WITH SUBMENUS (default)
-- ICON GRID (no submenu), WITH AND WITHOUT NAMES
-- DOUBLE COLUMN OF ICONS WITH ICON SUBMENUS, WITH AND WITHOUT NAMES
-- DOUBLE ROW OF ICONS WITH ICON SUBMENUS, WITH AND WITHOUT NAMES
+- **MENU WITH SUBMENUS** (default).
+- **ICON GRID** (no submenu), with and without names.
+- **DOUBLE COLUMN OF ICONS WITH ICON SUBMENUS**, with and without names.
+- **DOUBLE ROW OF ICONS WITH ICON SUBMENUS**, with and without names.
 
 <img width="572" height="486" alt="00a- EscritorioW-Submenú" src="https://github.com/user-attachments/assets/731258f9-303e-44b7-8184-524778f3fd5f" />
 
@@ -191,7 +191,7 @@ and the same applies to other menu types.
 ## MENU MODIFICATIONS
 - **WITHOUT UNPINNING THE TASKBAR BUTTON**. You can add or remove menu or submenu shortcuts, add or remove submenu folders, separators, etc., without unpinning the taskbar button. After any of these changes, clicking the taskbar button will open the menu without icons. Clicking the button again will recreate the corresponding icons.
 - **UNPINNING THE TASKBAR BUTTON**. The following modifications require removing the taskbar button (unpinning it) and recreating it:
-If you change the menu mode. For example, from "Menu and Submenu" mode to "Icon Grid" mode, etc.
+    - If you change the menu mode. For example, from "Menu and Submenu" mode to "Icon Grid" mode, etc.
     - If you add or remove dark mode.
     - If you change the number of columns in Icon Grid mode.
     - If you change the menu button icon on the taskbar.
