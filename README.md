@@ -6,10 +6,10 @@ Clau-Bucur's fork (https://github.com/clau-bucur/stacky)
 
 ## Description 
 There are 4 possible menu modes, all accessible from the same .exe file:
-- **MENU WITH SUBMENUS** (default).
-- **ICON GRID** (no submenu), with and without names.
-- **DOUBLE COLUMN OF ICONS WITH ICON SUBMENUS**, with and without names.
-- **DOUBLE ROW OF ICONS WITH ICON SUBMENUS**, with and without names.
+- **MENU WITH SUBMENUS** (default)
+- **ICON GRID** (no submenu), with and without names
+- **DOUBLE COLUMN OF ICONS WITH ICON SUBMENUS**, with and without names
+- **DOUBLE ROW OF ICONS WITH ICON SUBMENUS**, with and without names
 
 <img width="572" height="486" alt="00a- EscritorioW-Submenú" src="https://github.com/user-attachments/assets/731258f9-303e-44b7-8184-524778f3fd5f" />
 
@@ -123,7 +123,7 @@ System folders, such as Windows, Program Files, Program Files (x86), etc., are p
 If you want to create a menu made up of shortcuts to items located in system or hidden folders, it's recommended to create a folder inside the STACKY PLUS container folder. You could name it "SYSTEM," "APPLICATIONS," etc. Then, create (or copy) the shortcuts into this folder. This way, stacky.exe will not be restricted from displaying the icons correctly in the menu, and you'll be able to run the application or open the corresponding file.
 
 ## Menu modes
-- **ICON GRID** <br>
+### **1) ICON GRID** <br>
 To make the created menu appear as a grid of icons, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
 `--iconmenu-NN`
@@ -139,11 +139,11 @@ If you want the grid menu to have named icons, use:
 `--iconmenu-NN-name`
 
 NN should be replaced with a number indicating the number of columns to display.
-In this menu mode, submenus and separators are not visible. Only the main menu shortcuts are shown.
+    In this menu mode, submenus and separators are not visible. Only the main menu shortcuts are shown.
 
 <img width="572" height="239" alt="z11c- EscritorioW-Cuadríc-Cuadríc-name" src="https://github.com/user-attachments/assets/dfa3f4d1-26cd-4364-a989-fa0de45a0863" />
 
-- **DOUBLE-COLUMN ICON MENU WITH SUBMENU** <br>
+### **2) DOUBLE-COLUMN ICON MENU WITH SUBMENU** <br>
 To make the created menu appear as a 2-column grid of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
 `--iconmenu-C2`
@@ -160,7 +160,7 @@ In this menu mode, the separators are not visible.
 
 <img width="572" height="384" alt="z13- EscritorioW-2C·y·2C·name" src="https://github.com/user-attachments/assets/ed2b14be-13e9-4b72-92e1-95ea732cfa42" />
 
-- **DOUBLE-ROW ICON MENU WITH SUBMENU** <br>
+### **3)**DOUBLE-ROW ICON MENU WITH SUBMENU** <br>
 To make the created menu appear as a grid of two rows of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
 `--iconmenu-F2`
