@@ -160,7 +160,7 @@ In this menu mode, the separators are not visible.
 
 <img width="572" height="384" alt="z13- EscritorioW-2C·y·2C·name" src="https://github.com/user-attachments/assets/ed2b14be-13e9-4b72-92e1-95ea732cfa42" />
 
-### **3)**DOUBLE-ROW ICON MENU WITH SUBMENU** <br>
+### **3) DOUBLE-ROW ICON MENU WITH SUBMENU** <br>
 To make the created menu appear as a grid of two rows of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
 `--iconmenu-F2`
