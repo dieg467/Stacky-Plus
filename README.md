@@ -1,6 +1,20 @@
 # Stacky-Plus, 4 menu modes for the Windows taskbar  
 
-### Original Source <br>
+### Table of contents
+- [Original Source](#original-source)
+- [Description](#description)
+- [How many menus can I create on the taskbar?](#how-many-menus-can-i-create-on-the-taskbar)
+- [Download](#download)
+- [Why is it so fast?](#why-is-it-so-fast)
+- [Steps to follow](#steps-to-follow) 
+- [Shortcuts to Web Pages](#shortcuts-to-web-pages) 
+- [Shortcuts to system files and hidden files](#shortcuts-to-system-files-and-hidden-files) 
+- [Menu modes](#menu-modes) 
+- [Dark Mode](#dark-mode)
+- [Menu Modifications](#menu-modifications)
+-----------------------------------------------
+
+## Original Source<br>
 This project is based on Pawel Turlejski's original project (https://github.com/pawelt/stacky), which is no longer maintained, and
 Clau-Bucur's fork (https://github.com/clau-bucur/stacky)
 
@@ -30,10 +44,10 @@ This application downloads as an .exe file, but it does not require installation
 ## Why is it so fast?
 Stacky-Plus stores the icons for all shortcuts in a small file within the corresponding folder. When the user opens a menu, Stacky-Plus accesses its cache immediately, without delay, at full speed.
 
-## STEPS TO FOLLOW
+## Steps to follow
 The following steps explain how to create a menu on the taskbar.
 
-**1) CREATING THE CONTAINER FOLDER**. Create a folder anywhere on your computer (on drive C, in My Documents, etc.), and name it STACKY PLUS, for example. Place the stacky.exe file there.
+**1) CREATING THE CONTAINER FOLDER**. Create a folder anywhere on your computer (on drive C, in My Documents, etc.), and name it STACKY PLUS, for example. Place the stacky-plus.exe file there.
 
 **2) CREATING FOLDERS** <br>
 **a)** Inside the STACKY PLUS folder, create a folder to hold shortcuts. For example, you can create a "Multimedia" folder if you're going to place shortcuts related to music, videos, etc., there.
@@ -71,10 +85,10 @@ For example, it could be named aa.separator, Multimedia.separator, zz.separator,
 
 You can create multiple separators within the same menu or submenu. The position of a separator depends on its name, as they are ordered alphabetically.<br>
 
-**5) ORDERING ITEMS** <br>
+**5) ARRANGEMENT OF ELEMENTS** <br>
 - **Predetermined**<br>
 By default, items (folder, subfolder, shortcut, separator) are sorted alphabetically, and will be sorted accordingly in the corresponding menu or submenu. <br>
-- **PERSONALIZED** <br>
+- **Personalized** <br>
 If you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The %01% prefix will not be displayed in the menu. <br>
 Subsequent items will be named %02%, %03%, etc. If an item does not have a prefix, it will be sorted alphabetically.
 
@@ -103,6 +117,9 @@ Subsequent items will be named %02%, %03%, etc. If an item does not have a prefi
 
 If you have already completed this step, you can double-click the shortcut to open the created menu. The menu will open without icons. You must double-click it again to open the menu with icons. This allows you to verify that everything is correct before creating the button on the taskbar.
 
+<img width="677" height="522" alt="z12-Menú·abre·en·carpeta" src="https://github.com/user-attachments/assets/c288fe43-f557-420f-8c9a-16dd79ecdf79" />
+
+
 **f)** You can customize the shortcut icon by clicking "Change Icon" within Properties. This shortcut's icon will be the one that appears as the menu button on the Taskbar. <br>
 
 **g)** Drag the shortcut to the taskbar and drop it in the desired position. This will create the menu button.
@@ -116,6 +133,9 @@ This only happens the first time the menu is opened, once it has been created, o
 ## Shortcuts to Web Pages
 By default, website shortcuts display the browser icon (Chrome, Edge, Firefox, etc.). The icon shown in the menu can be customized in two ways:
 - Automatically with the website's favicon. To do this, access the website by clicking the shortcut in the created menu. Most icons are supported.
+
+<img width="373" height="140" alt="Pág-web" src="https://github.com/user-attachments/assets/4cb73a66-0933-4bdc-ac03-251e301f25c6" />
+
 - With an icon stored on your computer, by accessing the properties of the corresponding shortcut.
 
 ## Shortcuts to system files and hidden files
@@ -171,7 +191,7 @@ If you want the menu to have named icons, you must use:
 
 <img width="572" height="332" alt="z14- EscritorioW-2F·y·2F-name" src="https://github.com/user-attachments/assets/9a513bac-dd7e-4ce7-b7ff-7f58b453b19d" />
 
-## DARK MODE <br>
+## Dark Mode
 To display a menu in dark mode, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
 `--dark-mode`
@@ -188,7 +208,7 @@ and the same applies to other menu types.
 
 <img width="731" height="334" alt="z16bb- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/f86d0457-e032-4148-92cc-65281c6375ba" />
 
-## MENU MODIFICATIONS
+## Menu Modifications
 - **WITHOUT UNPINNING THE TASKBAR BUTTON**. You can add or remove menu or submenu shortcuts, add or remove submenu folders, separators, etc., without unpinning the taskbar button. After any of these changes, clicking the taskbar button will open the menu without icons. Clicking the button again will recreate the corresponding icons.
 - **UNPINNING THE TASKBAR BUTTON**. The following modifications require removing the taskbar button (unpinning it) and recreating it:
     - If you change the menu mode. For example, from "Menu and Submenu" mode to "Icon Grid" mode, etc.
