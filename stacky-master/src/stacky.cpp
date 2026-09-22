@@ -16,6 +16,8 @@
 #pragma comment(lib, "Dwmapi.lib")
 #include <winhttp.h>
 #pragma comment(lib, "Winhttp.lib")
+#include <Shlwapi.h>
+#pragma comment(lib, "Shlwapi.lib")
 
  /**************************************************************************************************
   * Standard libs
@@ -24,8 +26,13 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <algorithm>
+#include <mutex>
+#include <deque>
 
 #include "resource.h" // for version info
+#include "stacky_config.h" // hidden per-folder .stacky-config (Configuration window)
+#include "stacky_config_ui.h" // advanced Configuration window (RunStackyConfigWindow)
 
 #include <wingdi.h>
 #pragma comment(lib, "Msimg32.lib")
@@ -48,9 +55,58 @@ const Char* STACKY_GRID_CLASS  = L"stacky_grid";
 const Char* STACKY_TIP_CLASS   = L"stacky_tip";
 const Char* DIR_SEP = L"\\";
 const String SUBMENU_SUFFIX = L".submenu";
+const String SUBMENU_MINI_SUFFIX = L".submenu-mini";
+const int NORMAL_ICON_PX = 32;
+const int MINI_ICON_PX = 16;
 const String DESKTOP_INI = L"desktop.ini";
 const String FAVICON_FOLDER = L"favicon-icon-web";
-const DWORD CACHE_VERSION = 10; // Increment this when cache format changes
+const DWORD CACHE_VERSION = 14; // Increment this when cache format changes
+
+// Cached system color-mode (light/dark) and accent color, used as the
+// "system" default theme (--light-mode / --dark-mode override this).
+// Read once and cached; refreshed only when a WM_SETTINGCHANGE /
+// WM_DWMCOLORIZATIONCOLORCHANGED notification is received (see PopupWndProc
+// and GridWndProc), never polled.
+struct SystemThemeCache {
+	bool     initialized = false;
+	bool     dark        = false;
+	COLORREF accent      = RGB(0, 120, 215); // fallback Windows blue
+};
+static SystemThemeCache g_sysTheme;
+
+static bool ReadSystemAppsUseLightTheme() {
+	HKEY hKey;
+	DWORD value = 1, size = sizeof(value);
+	if (RegOpenKeyEx(HKEY_CURRENT_USER,
+		L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+		0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+		RegQueryValueEx(hKey, L"AppsUseLightTheme", nullptr, nullptr, (LPBYTE)&value, &size);
+		RegCloseKey(hKey);
+	}
+	return value != 0; // non-zero = light
+}
+
+static COLORREF ReadSystemAccentColor() {
+	DWORD colorizationColor = 0; BOOL opaque = FALSE;
+	if (SUCCEEDED(DwmGetColorizationColor(&colorizationColor, &opaque))) {
+		BYTE r = (BYTE)((colorizationColor >> 16) & 0xFF);
+		BYTE g = (BYTE)((colorizationColor >> 8) & 0xFF);
+		BYTE b = (BYTE)(colorizationColor & 0xFF);
+		return RGB(r, g, b);
+	}
+	return RGB(0, 120, 215);
+}
+
+static void RefreshSystemThemeCache() {
+	g_sysTheme.dark        = !ReadSystemAppsUseLightTheme();
+	g_sysTheme.accent      = ReadSystemAccentColor();
+	g_sysTheme.initialized = true;
+}
+
+static const SystemThemeCache& GetSystemTheme() {
+	if (!g_sysTheme.initialized) RefreshSystemThemeCache();
+	return g_sysTheme;
+}
 
 // Global hook handle for menu window creation
 HHOOK g_hMenuHook = nullptr;
@@ -65,6 +121,8 @@ struct App;
 LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK GridWndProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK TipWndProc  (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+void RestoreFocusToRootMenuWindow(HWND owner);
+bool IsDescendantMenuWindow(HWND ancestor, HWND candidate);
 
 // Grid display modes
 enum GridMode {
@@ -75,6 +133,20 @@ enum GridMode {
 	GRID_CASCADE_NAME = 4,  // 2 cols, icons + truncated name below, submenus open as 1-col grid with names
 	GRID_F2 = 5,  // row-based: items with submenu on row 1, others on row 2; submenus open upward
 	GRID_F2_NAME = 6,  // same as GRID_F2, with truncated name below each icon
+	GRID_NAME_RIGHT = 10, // iconmenu-NN-name-right: NN cols, name to the right of the icon, default text size, no gap
+
+	// --singlesubmenu mode: used ONLY for the grid window opened for a .submenu folder
+	// (never for the root menu, and these submenus never have child submenus).
+	GRID_SS_ICON       = 7,  // variant 1 (".icononly-NN"): plain NN-column icon grid, no names
+	GRID_SS_NAME_RIGHT = 8,  // variant 2 (".NN-name-right"): NN columns, name to the right of the icon
+	GRID_SS_NAME_BELOW = 9,  // variant 3 (".NN-name-below"): NN columns, name below the icon (1 line)
+};
+
+// Overall menu color-theme mode.
+enum ThemeMode {
+	THEME_SYSTEM = 0, // follow the system color mode/accent (cached, event-driven)
+	THEME_LIGHT  = 1, // --light-mode: force current light appearance
+	THEME_DARK   = 2, // --dark-mode: force current dark appearance
 };
 
 // Timer IDs used by PopupWndProc
@@ -123,6 +195,16 @@ enum {
 	WM_OPEN_TARGET_FOLDER = WM_BASE + 1,
 	WM_MENU_ITEM = WM_BASE + 2,
 	WM_OPEN_LOCATION = WM_BASE + 3,
+
+	// Right-click context menu (submenu-folder icons), used by PopupWndProc/GridWndProc.
+	WM_CTX_OPEN_SUBFOLDER     = WM_BASE + 10,
+	WM_CTX_OPEN_MENU_FOLDER   = WM_BASE + 11,
+	WM_CTX_OPEN_STACKY_FOLDER = WM_BASE + 12,
+	WM_CTX_CLOSE_MENU         = WM_BASE + 13,
+
+	// Right-click context menu (shortcut icons), used by PopupWndProc/GridWndProc.
+	WM_CTX_OPEN_SHORTCUT_LOCATION = WM_BASE + 14,
+	WM_CTX_RUN_AS_ADMIN           = WM_BASE + 15,
 
 	APP_EXIT_DELAY = 3 * 1000,
 
@@ -187,6 +269,193 @@ struct Util {
 			return false;
 		}
 	}
+	// Returns true if `leaf` ends with ".icononly-NN" where NN is 1-2 digits,
+	// and removes that entire trailing token from `leaf` (in place on success).
+	// Returns false and leaves `leaf` unchanged otherwise.
+	static bool StripIconOnlyNN(String& leaf) {
+		const String pfx = L".icononly-";
+		if (leaf.size() < pfx.size() + 1) return false;
+		size_t d = leaf.size();
+		while (d > 0 && leaf[d - 1] >= L'0' && leaf[d - 1] <= L'9') --d;
+		size_t digitCount = leaf.size() - d;
+		if (digitCount < 1 || digitCount > 2) return false;
+		if (d < pfx.size() || leaf.compare(d - pfx.size(), pfx.size(), pfx) != 0) return false;
+		leaf.erase(d - pfx.size());
+		return true;
+	}
+	// Strips a trailing ".NN-name-right" or ".NN-name-below" (NN = 1-2 digits).
+	static bool StripNNNameLayout(String& leaf, bool below) {
+		const String suf = below ? String(L"-name-below") : String(L"-name-right");
+		if (leaf.size() < suf.size() + 2) return false; // ".N" + suffix
+		if (!ends_with(leaf, suf)) return false;
+		size_t before = leaf.size() - suf.size(); // index of the '-' that starts the suffix
+		size_t d = before;
+		while (d > 0 && leaf[d - 1] >= L'0' && leaf[d - 1] <= L'9') --d;
+		size_t digitCount = before - d;
+		if (digitCount < 1 || digitCount > 2 || d == 0 || leaf[d - 1] != L'.') return false;
+		leaf.erase(d - 1);
+		return true;
+	}
+	// --singlesubmenu layout token at the end of a folder leaf name.
+	enum SSLayoutKind { SS_LAYOUT_NONE = 0, SS_LAYOUT_ICON = 1, SS_LAYOUT_NAME_RIGHT = 2, SS_LAYOUT_NAME_BELOW = 3 };
+	struct SSLayout {
+		SSLayoutKind kind = SS_LAYOUT_NONE;
+		int cols = 3;
+	};
+	static SSLayout ParseSSLayout(const String& leaf) {
+		SSLayout r;
+		if (ends_with(leaf, L"-name-right")) {
+			size_t before = leaf.size() - 11;
+			size_t d = before;
+			while (d > 0 && leaf[d - 1] >= L'0' && leaf[d - 1] <= L'9') --d;
+			size_t digitCount = before - d;
+			if (digitCount >= 1 && digitCount <= 2 && d > 0 && leaf[d - 1] == L'.') {
+				long n = wcstol(leaf.c_str() + d, nullptr, 10);
+				if (n >= 1 && n <= 99) { r.kind = SS_LAYOUT_NAME_RIGHT; r.cols = (int)n; return r; }
+			}
+			return r;
+		}
+		if (ends_with(leaf, L"-name-below")) {
+			size_t before = leaf.size() - 11;
+			size_t d = before;
+			while (d > 0 && leaf[d - 1] >= L'0' && leaf[d - 1] <= L'9') --d;
+			size_t digitCount = before - d;
+			if (digitCount >= 1 && digitCount <= 2 && d > 0 && leaf[d - 1] == L'.') {
+				long n = wcstol(leaf.c_str() + d, nullptr, 10);
+				if (n >= 1 && n <= 99) { r.kind = SS_LAYOUT_NAME_BELOW; r.cols = (int)n; return r; }
+			}
+			return r;
+		}
+		size_t d = leaf.size();
+		while (d > 0 && leaf[d - 1] >= L'0' && leaf[d - 1] <= L'9') --d;
+		size_t digitCount = leaf.size() - d;
+		const String pfx = L".icononly-";
+		if (digitCount >= 1 && digitCount <= 2 && d >= pfx.size() &&
+			leaf.compare(d - pfx.size(), pfx.size(), pfx) == 0) {
+			long n = wcstol(leaf.c_str() + d, nullptr, 10);
+			if (n >= 1 && n <= 99) { r.kind = SS_LAYOUT_ICON; r.cols = (int)n; return r; }
+		}
+		return r;
+	}
+	// Returns the last path segment of `name` (after the last DIR_SEP), i.e. the
+	// actual folder/file leaf name. For nested items, Cache::Item::name stores the
+	// FULL relative path (e.g. "A.submenu\\B.submenu"), so the .submenu suffix
+	// helpers below must only ever inspect the leaf segment, never the whole path
+	// (otherwise a `.find(".submenu")` on an ancestor segment could shadow the
+	// real, deeper .submenu terminator).
+	static String LastPathSegment(const String& name) {
+		size_t pos = name.rfind(DIR_SEP);
+		if (pos == String::npos) return name;
+		return name.substr(pos + String(DIR_SEP).size());
+	}
+	// Strips ".submenu" / ".submenu-mini" and --singlesubmenu layout tokens
+	// (.icononly-NN, .NN-name-right, .NN-name-below, .mini) so the display name
+	// is the clean folder name. Only the last path segment is considered.
+	static String StripSubmenuSuffix(const String& target) {
+		String leaf = LastPathSegment(target);
+		String prefixPath = target.substr(0, target.size() - leaf.size());
+		
+		// Legacy: .submenu-mini
+		if (ends_with(leaf, SUBMENU_MINI_SUFFIX)) return prefixPath + rtrim(leaf, SUBMENU_MINI_SUFFIX);
+		// .submenu optionally followed by layout variants
+		size_t pos = leaf.find(SUBMENU_SUFFIX);
+		if (pos != String::npos) {
+			size_t afterPos = pos + SUBMENU_SUFFIX.size();
+			if (afterPos == leaf.size() || leaf[afterPos] == L'-' || leaf[afterPos] == L'.')
+				return prefixPath + leaf.substr(0, pos);
+		}
+		// Plain folder: strip .icononly-NN / .NN-name-right / .NN-name-below / .mini
+		String s = leaf;
+		while (true) {
+			if (StripNNNameLayout(s, false)) continue;
+			if (StripNNNameLayout(s, true)) continue;
+			if (StripIconOnlyNN(s)) continue;
+			if (ends_with(s, L".mini")) {
+				s = s.substr(0, s.size() - 5);
+				continue;
+			}
+			break;
+		}
+		if (s == leaf) return target;
+		return prefixPath + s;
+	}
+	// True if `name` is a submenu folder: ".submenu" / ".submenu-mini" (default
+	// menu mode), or a --singlesubmenu layout token without ".submenu"
+	// (.icononly-NN, .NN-name-right, .NN-name-below), or a trailing ".mini".
+	static bool IsSubmenuFolderName(const String& name) {
+		String leaf = LastPathSegment(name);
+		if (ends_with(leaf, SUBMENU_MINI_SUFFIX)) return true;
+		size_t pos = leaf.find(SUBMENU_SUFFIX);
+		if (pos != String::npos) {
+			size_t afterPos = pos + SUBMENU_SUFFIX.size();
+			if (afterPos == leaf.size() || leaf[afterPos] == L'-' || leaf[afterPos] == L'.')
+				return true;
+		}
+		if (ParseSSLayout(leaf).kind != SS_LAYOUT_NONE) return true;
+		if (ends_with(leaf, L".mini")) return true;
+		return false;
+	}
+	// True if the folder name carries a "mini" token, either as the exact
+	// legacy terminator (".submenu-mini") or combined with a --singlesubmenu
+	// layout-variant suffix (e.g. ".submenu.mini.4-name-right"), or as a
+	// standalone ".mini" token in a plain folder name (e.g. "Apps.mini").
+	// Only the last path segment is checked (see IsSubmenuFolderName).
+	static bool IsMiniSubmenuFolderName(const String& name) {
+		String leaf = LastPathSegment(name);
+		// Legacy: .submenu-mini or .submenu.mini / .submenu.mini-NN / .submenu.mini.NN
+		size_t pos = leaf.find(SUBMENU_SUFFIX);
+		if (pos != String::npos) {
+			String rest = leaf.substr(pos + SUBMENU_SUFFIX.size());
+			if (!rest.empty() && (rest[0] == L'-' || rest[0] == L'.')) rest.erase(0, 1);
+			if (rest.compare(0, 4, L"mini") == 0 &&
+				(rest.size() == 4 || rest[4] == L'-' || rest[4] == L'.')) return true;
+		}
+		// Plain folder: .mini token at end or followed by .NN / -name-* variants.
+		// The ".mini" token is always dot-prefixed, so the character right before
+		// the dot is simply the end of the base folder name (or of a previous
+		// token) - it does not need to be '.' or '-' itself, only the character
+		// AFTER the "mini" word needs to be a valid boundary ('-', '.', or end).
+		if (ends_with(leaf, L".mini")) return true;
+		size_t dotPos = leaf.find(L".mini");
+		while (dotPos != String::npos) {
+			size_t after = dotPos + 5;
+			if (after == leaf.size() || leaf[after] == L'-' || leaf[after] == L'.') return true;
+			dotPos = leaf.find(L".mini", dotPos + 1);
+		}
+		return false;
+	}
+
+	// Automatic hidden submenu detection: a folder that isn't explicitly named
+	// as a submenu (no .submenu / .submenu-mini / --singlesubmenu layout token)
+	// is still treated as a submenu if it contains at least one shortcut/item
+	// or at least one nested folder. The name on disk is never modified; this
+	// only affects in-memory classification used to build menus.
+	static bool FolderHasShortcutOrSubfolder(const String& folder_path) {
+		String search_path = rtrim(folder_path, DIR_SEP) + DIR_SEP + L"*";
+		WIN32_FIND_DATA ffd = { 0 };
+		HANDLE hfind = ::FindFirstFile(search_path.c_str(), &ffd);
+		if (hfind == INVALID_HANDLE_VALUE) return false;
+		bool found = false;
+		do {
+			String filename = ffd.cFileName;
+			if (filename == L"." || filename == L".." || (ffd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) ||
+				ends_with(filename, L".ignore") || filename == DESKTOP_INI)
+				continue;
+			if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+				found = true;
+				break;
+			}
+			if (ends_with(filename, L".lnk") || ends_with(filename, L".url") ||
+				ends_with(filename, L".exe") || ends_with(filename, L".bat") ||
+				ends_with(filename, L".cmd") || ends_with(filename, L".vbs") ||
+				ends_with(filename, L".ico")) {
+				found = true;
+				break;
+			}
+		} while (::FindNextFile(hfind, &ffd) != 0);
+		::FindClose(hfind);
+		return found;
+	}
 
 	static void kill_other_stackies() {
 		PROCESSENTRY32 entry = { 0 };
@@ -196,14 +465,25 @@ struct Util {
 		do {
 			found = ::Process32Next(snapshot, &entry);
 			if (entry.th32ProcessID != ::GetCurrentProcessId() && entry.szExeFile == STACKY_EXEC_NAME) {
-				HANDLE hOtherStacky = ::OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
+				// PROCESS_TERMINATE is the least privilege needed here (and
+				// is enough even for processes not owned by the current
+				// user session in the common case), so prefer it over
+				// PROCESS_ALL_ACCESS, which can fail to open with access
+				// denied in situations where terminating would have
+				// succeeded just fine (e.g. right after the Configuration
+				// window - itself another stacky-plus.exe instance - closes
+				// and the OS hasn't fully released the process object yet).
+				HANDLE hOtherStacky = ::OpenProcess(PROCESS_TERMINATE, FALSE, entry.th32ProcessID);
 				if (hOtherStacky) {
 					::TerminateProcess(hOtherStacky, 0);
 					::CloseHandle(hOtherStacky);
 				}
-				else {
-					Util::msg(L"Failed to open another stacky-plus.exe process. Kill stacky-plus.exe manually.");
-				}
+				// If OpenProcess/TerminateProcess still fails (process may
+				// have already exited on its own between the snapshot and
+				// this call, or be in the middle of exiting), silently
+				// ignore it instead of interrupting the user with an error
+				// message box: it's harmless, since a stale/exiting other
+				// instance doesn't prevent this one from opening its menu.
 			}
 		} while (found);
 		::CloseHandle(snapshot);
@@ -371,7 +651,9 @@ struct Util {
 		::DwmSetWindowAttribute(hwnd, DWMWA_CORNER_PREFERENCE, &cornerPreference, sizeof(cornerPreference));
 	}
 
-	// Get taskbar position and dimensions
+	// Get taskbar position and dimensions (always returns the PRIMARY monitor's
+	// taskbar window). Kept for callers that explicitly want the primary
+	// taskbar; multi-monitor-aware code should use GetTaskbarRectForMonitor().
 	static RECT GetTaskbarRect() {
 		HWND hTaskbar = ::FindWindow(L"Shell_TrayWnd", nullptr);
 		RECT taskbarRect = { 0, 0, 0, 0 };
@@ -391,6 +673,52 @@ struct Util {
 			taskbarRect.bottom = screenRect.bottom + 40; // Approximate taskbar height
 		}
 
+		return taskbarRect;
+	}
+
+	struct FindTaskbarOnMonitorCtx {
+		HMONITOR target;
+		RECT     result;
+		bool     found;
+	};
+
+	static BOOL CALLBACK EnumTaskbarWindowsProc(HWND hwnd, LPARAM lParam) {
+		auto* ctx = (FindTaskbarOnMonitorCtx*)lParam;
+		wchar_t cls[64] = { 0 };
+		GetClassName(hwnd, cls, _countof(cls));
+		if (wcscmp(cls, L"Shell_TrayWnd") != 0 && wcscmp(cls, L"Shell_SecondaryTrayWnd") != 0)
+			return TRUE; // keep enumerating
+
+		RECT wr; GetWindowRect(hwnd, &wr);
+		HMONITOR mon = ::MonitorFromRect(&wr, MONITOR_DEFAULTTONEAREST);
+		if (mon == ctx->target) {
+			ctx->result = wr;
+			ctx->found = true;
+			return FALSE; // stop, found the taskbar on the target monitor
+		}
+		return TRUE;
+	}
+
+	// Get the taskbar rect for a SPECIFIC monitor (needed for multi-monitor
+	// setups, where each monitor can have its own taskbar window
+	// ("Shell_TrayWnd" for the primary monitor, "Shell_SecondaryTrayWnd" for
+	// secondary monitors). Falls back to the primary taskbar / work-area-edge
+	// approximation if no taskbar window is found on that monitor.
+	static RECT GetTaskbarRectForMonitor(HMONITOR hMonitor) {
+		FindTaskbarOnMonitorCtx ctx{ hMonitor, {0,0,0,0}, false };
+		::EnumWindows(EnumTaskbarWindowsProc, (LPARAM)&ctx);
+		if (ctx.found) return ctx.result;
+
+		// Fallback: approximate using the work area / monitor rect of that monitor
+		// (assume taskbar sits along the edge where the work area shrinks).
+		MONITORINFO mi{ sizeof(mi) };
+		::GetMonitorInfo(hMonitor, &mi);
+		RECT wa = mi.rcWork, mr = mi.rcMonitor;
+		RECT taskbarRect = { mr.left, mr.bottom, mr.right, mr.bottom };
+		if (wa.bottom < mr.bottom)      taskbarRect = { mr.left, wa.bottom, mr.right, mr.bottom };
+		else if (wa.top > mr.top)       taskbarRect = { mr.left, mr.top, mr.right, wa.top };
+		else if (wa.left > mr.left)     taskbarRect = { mr.left, mr.top, wa.left, mr.bottom };
+		else if (wa.right < mr.right)   taskbarRect = { wa.right, mr.top, mr.right, mr.bottom };
 		return taskbarRect;
 	}
 
@@ -454,7 +782,7 @@ struct Util {
 		String url;
 		if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, (void**)&ppf))) {
 			if (SUCCEEDED(ppf->Load(file_path.c_str(), STGM_READ))) {
-				// Try getting the path – for internet shortcuts it will be a URL
+				// Try getting the path ï¿½ for internet shortcuts it will be a URL
 				WCHAR path[MAX_PATH] = { 0 };
 				psl->GetPath(path, MAX_PATH, nullptr, 0);
 				String s = path;
@@ -747,11 +1075,39 @@ struct Util {
 		return ok;
 	}
 
+	// Apply a downloaded favicon .ico as the visible icon of the underlying
+	// shortcut file (.url or .lnk) so File Explorer also shows it, not just
+	// the Stacky menu/submenu. For .url files this sets IconFile/IconIndex
+	// in the [InternetShortcut] section; for .lnk files it uses IShellLink's
+	// SetIconLocation and re-saves the link via IPersistFile.
+	static void ApplyIconToShortcutFile(const String& file_path, const String& icon_path) {
+		if (ends_with(file_path, L".url")) {
+			::WritePrivateProfileString(L"InternetShortcut", L"IconFile", icon_path.c_str(), file_path.c_str());
+			::WritePrivateProfileString(L"InternetShortcut", L"IconIndex", L"0", file_path.c_str());
+		} else if (ends_with(file_path, L".lnk")) {
+			IShellLink* psl = nullptr;
+			if (SUCCEEDED(::CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLink, (void**)&psl))) {
+				IPersistFile* ppf = nullptr;
+				if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, (void**)&ppf))) {
+					if (SUCCEEDED(ppf->Load(file_path.c_str(), STGM_READWRITE))) {
+						psl->SetIconLocation(icon_path.c_str(), 0);
+						ppf->Save(file_path.c_str(), TRUE);
+					}
+					ppf->Release();
+				}
+				psl->Release();
+			}
+		}
+		// Notify Explorer so it refreshes the icon for this specific file
+		::SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATH, file_path.c_str(), nullptr);
+	}
+
 	struct FaviconThreadParams {
 		String url;
 		String dest_path;
 		String base_dir;
-		String cache_path;  // !stacky.cache path to delete so it rebuilds next time
+		String cache_path;    // !stacky.cache path to delete so it rebuilds next time
+		String target_path;   // full path of the .url/.lnk shortcut this favicon belongs to
 	};
 
 	static DWORD WINAPI FaviconThreadProc(LPVOID param) {
@@ -760,6 +1116,11 @@ struct Util {
 		::Sleep(2000);
 		bool saved = DownloadAndSaveFavicon(p->url, p->dest_path, p->base_dir);
 		if (saved) {
+			// Also apply the favicon to the shortcut file itself so it shows
+			// up in File Explorer, not just in the Stacky menu/submenu.
+			if (!p->target_path.empty()) {
+				ApplyIconToShortcutFile(p->target_path, p->dest_path);
+			}
 			// Delete cache so next launch rebuilds with favicon icon
 			::DeleteFile(p->cache_path.c_str());
 		}
@@ -769,20 +1130,438 @@ struct Util {
 
 	// Launch favicon download in background thread.
 	static void TriggerFaviconDownloadAsync(const String& base_dir, const String& item_name,
-											 const String& url, const String& cache_file_path) {
+											 const String& url, const String& cache_file_path,
+											 const String& target_path = L"") {
 		// Don't re-download if favicon already cached
 		String dest = GetFaviconCachePath(base_dir, item_name);
 		if (::GetFileAttributes(dest.c_str()) != INVALID_FILE_ATTRIBUTES)
 			return;  // already have it
 
 		FaviconThreadParams* p = new FaviconThreadParams();
-		p->url        = url;
-		p->dest_path  = dest;
-		p->base_dir   = base_dir;
-		p->cache_path = cache_file_path;
+		p->url         = url;
+		p->dest_path   = dest;
+		p->base_dir    = base_dir;
+		p->cache_path  = cache_file_path;
+		p->target_path = target_path;
 		HANDLE hThread = ::CreateThread(nullptr, 0, FaviconThreadProc, p, 0, nullptr);
 		if (hThread) ::CloseHandle(hThread);
 		else delete p;
+	}
+
+	// ------------------------------------------------------------------------------------------
+	// Recent files MRU: tracks, per resolved application, the last documents launched through
+	// Stacky-plus itself (independent of Windows' own Recent-items privacy setting). All access
+	// goes through an in-memory map guarded by a mutex; disk persistence happens on a background
+	// thread so neither launching a shortcut nor opening the context menu ever blocks on I/O.
+	// ------------------------------------------------------------------------------------------
+	static std::mutex& RecentFilesMutex() {
+		static std::mutex m;
+		return m;
+	}
+	static std::unordered_map<String, std::deque<String>>& RecentFilesMap() {
+		static std::unordered_map<String, std::deque<String>> m;
+		return m;
+	}
+	static bool& RecentFilesLoaded() {
+		static bool loaded = false;
+		return loaded;
+	}
+	static String RecentFilesStorePath() {
+		return GetExeFolder() + L"\\!stacky.recent";
+	}
+
+	// Must be called with RecentFilesMutex() held.
+	static void LoadRecentFilesLocked() {
+		FILE* f = _wfopen(RecentFilesStorePath().c_str(), L"rb");
+		if (!f) return;
+		fseek(f, 0, SEEK_END);
+		long file_size = ftell(f);
+		fseek(f, 0, SEEK_SET);
+		if (file_size <= 0) { fclose(f); return; }
+		std::vector<Byte> data(file_size);
+		fread(data.data(), 1, file_size, f);
+		fclose(f);
+
+		size_t pos = 0;
+		while (pos + sizeof(Char) <= data.size()) {
+			String key = (const Char*)(data.data() + pos);
+			pos += (key.size() + 1) * sizeof(Char);
+			if (pos + sizeof(Byte) > data.size()) break;
+			Byte count = data[pos];
+			pos += sizeof(Byte);
+			std::deque<String> files;
+			for (Byte i = 0; i < count && pos + sizeof(Char) <= data.size(); ++i) {
+				String file_path = (const Char*)(data.data() + pos);
+				pos += (file_path.size() + 1) * sizeof(Char);
+				files.push_back(file_path);
+			}
+			RecentFilesMap()[key] = files;
+		}
+	}
+	static void EnsureRecentFilesLoaded() {
+		std::lock_guard<std::mutex> lock(RecentFilesMutex());
+		if (RecentFilesLoaded()) return;
+		RecentFilesLoaded() = true;
+		LoadRecentFilesLocked();
+	}
+
+	static void AppendStringToByteBuffer(std::vector<Byte>& buf, const String& s) {
+		const Byte* bytes = (const Byte*)s.c_str();
+		size_t byte_len = (s.size() + 1) * sizeof(Char);
+		buf.insert(buf.end(), bytes, bytes + byte_len);
+	}
+
+	struct RecentFilesSaveParams {
+		std::vector<Byte> data;
+		String path;
+	};
+	static DWORD WINAPI RecentFilesSaveThreadProc(LPVOID param) {
+		RecentFilesSaveParams* p = (RecentFilesSaveParams*)param;
+		FILE* f = _wfopen(p->path.c_str(), L"wb");
+		if (f) {
+			if (!p->data.empty()) fwrite(p->data.data(), 1, p->data.size(), f);
+			fclose(f);
+		}
+		delete p;
+		return 0;
+	}
+	static void SaveRecentFilesAsync() {
+		RecentFilesSaveParams* p = new RecentFilesSaveParams();
+		p->path = RecentFilesStorePath();
+		{
+			std::lock_guard<std::mutex> lock(RecentFilesMutex());
+			for (auto& kv : RecentFilesMap()) {
+				AppendStringToByteBuffer(p->data, kv.first);
+				Byte count = (Byte)(kv.second.size() > 255 ? 255 : kv.second.size());
+				p->data.push_back(count);
+				Byte i = 0;
+				for (auto& file_path : kv.second) {
+					if (i++ >= count) break;
+					AppendStringToByteBuffer(p->data, file_path);
+				}
+			}
+		}
+		HANDLE hThread = ::CreateThread(nullptr, 0, RecentFilesSaveThreadProc, p, 0, nullptr);
+		if (hThread) ::CloseHandle(hThread);
+		else delete p;
+	}
+
+	// Records that "target_path" (a document, not the app itself) was just launched, filed
+	// under the application that Windows would use to open it by default. cmd is either a
+	// .lnk shortcut or a plain file path, exactly as passed to ShellExecute.
+	static void RegisterRecentLaunch(const String& cmd) {
+		TCHAR resolved[MAX_PATH] = { 0 };
+		HRESULT hr = ResolveShortcut(NULL, cmd.c_str(), resolved, _countof(resolved));
+		String target = (SUCCEEDED(hr) && resolved[0]) ? String(resolved) : cmd;
+
+		size_t dot = target.find_last_of(L'.');
+		if (dot == String::npos) return;
+		String ext = target.substr(dot);
+		for (auto& c : ext) c = (Char)towlower(c);
+		if (ext == L".exe") return; // launching the app itself, not a document: nothing to record
+
+		WCHAR assoc_path[MAX_PATH] = { 0 };
+		DWORD assoc_len = _countof(assoc_path);
+		if (FAILED(::AssocQueryString(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE,
+				ext.c_str(), nullptr, assoc_path, &assoc_len)))
+			return;
+
+		String app_key = assoc_path;
+		for (auto& c : app_key) c = (Char)towlower(c);
+
+		EnsureRecentFilesLoaded();
+		{
+			std::lock_guard<std::mutex> lock(RecentFilesMutex());
+			auto& dq = RecentFilesMap()[app_key];
+			for (auto it = dq.begin(); it != dq.end(); ++it) {
+				if (_wcsicmp(it->c_str(), target.c_str()) == 0) { dq.erase(it); break; }
+			}
+			dq.push_front(target);
+			while (dq.size() > 5) dq.pop_back();
+		}
+		SaveRecentFilesAsync();
+	}
+
+	// Return up to max_count most recently used documents launched through Stacky-plus whose
+	// default handler application matches app_exe_path. Reads only the in-memory cache (loaded
+	// once, lazily) so it never touches disk when the context menu is opened.
+	static std::vector<String> GetRecentFilesForApp(const String& app_exe_path, size_t max_count = 5) {
+		std::vector<String> result;
+		if (app_exe_path.empty()) return result;
+
+		String key = app_exe_path;
+		for (auto& c : key) c = (Char)towlower(c);
+
+		EnsureRecentFilesLoaded();
+		std::lock_guard<std::mutex> lock(RecentFilesMutex());
+		auto it = RecentFilesMap().find(key);
+		if (it == RecentFilesMap().end()) return result;
+		for (auto& f : it->second) {
+			result.push_back(f);
+			if (result.size() >= max_count) break;
+		}
+		return result;
+	}
+
+	// Return the folder that contains the currently running executable (no trailing slash).
+	static String GetExeFolder() {
+		Char path[MAX_PATH] = { 0 };
+		::GetModuleFileName(nullptr, path, MAX_PATH);
+		String p = path;
+		size_t pos = p.find_last_of(L"\\/");
+		return (pos == String::npos) ? p : p.substr(0, pos);
+	}
+
+	// True if the current user's UI language is Spanish (any variant: es-ES, es-MX, etc.).
+	static bool IsSpanishUILanguage() {
+		WCHAR name[LOCALE_NAME_MAX_LENGTH] = { 0 };
+		if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0) {
+			return _wcsnicmp(name, L"es", 2) == 0;
+		}
+		LANGID lang = ::GetUserDefaultUILanguage();
+		return PRIMARYLANGID(lang) == LANG_SPANISH;
+	}
+
+	// Return the two-letter ISO 639-1 language code of the current user's UI language
+	// (e.g. L"en", L"es", L"fr"...), lowercase. Falls back to L"en" on failure.
+	static String GetUILanguageCode() {
+		WCHAR name[LOCALE_NAME_MAX_LENGTH] = { 0 };
+		if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0 && name[0] && name[1]) {
+			WCHAR code[3] = { (WCHAR)towlower(name[0]), (WCHAR)towlower(name[1]), 0 };
+			return String(code);
+		}
+		return L"en";
+	}
+
+	// Undocumented uxtheme.dll ordinals used to switch classic (non-owner-drawn)
+	// popup menus to dark mode, matching the rest of the app's dark-mode styling.
+	// This is the same mechanism used by Explorer and other apps for dark context menus.
+	static void EnableDarkContextMenu(bool enable) {
+		static HMODULE hUxtheme = ::LoadLibraryW(L"uxtheme.dll");
+		if (!hUxtheme) return;
+
+		typedef void (WINAPI* SetPreferredAppModeFn)(int mode);
+		typedef void (WINAPI* FlushMenuThemesFn)();
+
+		static auto setPreferredAppMode = (SetPreferredAppModeFn)::GetProcAddress(hUxtheme, MAKEINTRESOURCEA(135));
+		static auto flushMenuThemes     = (FlushMenuThemesFn)::GetProcAddress(hUxtheme, MAKEINTRESOURCEA(136));
+
+		if (setPreferredAppMode) setPreferredAppMode(enable ? 2 /*ForceDark*/ : 0 /*Default*/);
+		if (flushMenuThemes) flushMenuThemes();
+	}
+
+	// Extensible translation table for the submenu right-click context menu.
+	// Add new languages here as additional rows (2-letter ISO 639-1 code + 3 strings).
+	// English is the default/fallback for any language not listed.
+	struct SubmenuCtxMenuStrings {
+		const wchar_t* lang;
+		const wchar_t* open_subfolder;
+		const wchar_t* open_menu_folder;
+		const wchar_t* open_stacky_folder;
+		const wchar_t* close_menu;
+		const wchar_t* open_shortcut_location;
+		const wchar_t* run_as_admin;
+	};
+
+	static const SubmenuCtxMenuStrings& GetSubmenuCtxMenuStrings() {
+		static const SubmenuCtxMenuStrings table[] = {
+			{ L"en", L"Open subfolder",           L"Open main menu folder",              L"Open Stacky-plus.exe folder",        L"Close this context menu", L"Open shortcut location", L"Run as administrator" },
+			{ L"es", L"Abrir subcarpeta",         L"Abrir carpeta del men\u00FA principal", L"Abrir carpeta de Stacky-plus.exe", L"Cerrar este men\u00FA contextual", L"Abrir ubicaci\u00F3n del acceso directo", L"Ejecutar como administrador" },
+			{ L"pt", L"Abrir subpasta",           L"Abrir pasta do menu principal",      L"Abrir pasta do Stacky-plus.exe",     L"Fechar este menu de contexto", L"Abrir local do atalho", L"Executar como administrador" },
+			{ L"fr", L"Ouvrir le sous-dossier",   L"Ouvrir le dossier du menu principal",L"Ouvrir le dossier de Stacky-plus.exe", L"Fermer ce menu contextuel", L"Ouvrir l'emplacement du raccourci", L"Ex\u00E9cuter en tant qu'administrateur" },
+			{ L"de", L"Unterordner \u00F6ffnen",  L"Hauptmen\u00FC-Ordner \u00F6ffnen",  L"Stacky-plus.exe-Ordner \u00F6ffnen", L"Dieses Kontextmen\u00FC schlie\u00DFen", L"Verkn\u00FCpfungsspeicherort \u00F6ffnen", L"Als Administrator ausf\u00FChren" },
+			{ L"it", L"Apri sottocartella",       L"Apri cartella del menu principale",  L"Apri cartella di Stacky-plus.exe",   L"Chiudi questo menu contestuale", L"Apri percorso collegamento", L"Esegui come amministratore" },
+			{ L"pl", L"Otw\u00F3rz podfolder",    L"Otw\u00F3rz folder menu g\u0142\u00F3wnego", L"Otw\u00F3rz folder Stacky-plus.exe", L"Zamknij to menu kontekstowe", L"Otw\u00F3rz lokalizacj\u0119 skr\u00F3tu", L"Uruchom jako administrator" },
+			{ L"ru", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u043E\u0434\u043F\u0430\u043F\u043A\u0443", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0430\u043F\u043A\u0443 \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u043C\u0435\u043D\u044E", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0430\u043F\u043A\u0443 Stacky-plus.exe", L"\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u044D\u0442\u043E \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043C\u0435\u0441\u0442\u043E\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u044F\u0440\u043B\u044B\u043A\u0430", L"\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u043E\u0442 \u0438\u043C\u0435\u043D\u0438 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430" },
+			{ L"zh", L"\u6253\u5F00\u5B50\u6587\u4EF6\u5939", L"\u6253\u5F00\u4E3B\u83DC\u5355\u6587\u4EF6\u5939", L"\u6253\u5F00 Stacky-plus.exe \u6587\u4EF6\u5939", L"\u5173\u95ED\u6B64\u5FEB\u6377\u83DC\u5355", L"\u6253\u5F00\u5FEB\u6377\u65B9\u5F0F\u4F4D\u7F6E", L"\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u8FD0\u884C" },
+			{ L"ja", L"\u30B5\u30D6\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"\u30E1\u30A4\u30F3\u30E1\u30CB\u30E5\u30FC\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"Stacky-plus.exe\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"\u3053\u306E\u30B3\u30F3\u30C6\u30AD\u30B9\u30C8\u30E1\u30CB\u30E5\u30FC\u3092\u9589\u3058\u308B", L"\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8\u306E\u4FDD\u5B58\u5834\u6240\u3092\u958B\u304F", L"\u7BA1\u7406\u8005\u3068\u3057\u3066\u5B9F\u884C" },
+		};
+		String code = GetUILanguageCode();
+		for (const auto& row : table) {
+			if (code == row.lang) return row;
+		}
+		return table[0]; // English fallback
+	}
+
+	// Convert an HICON into a top-down 32bpp premultiplied-alpha DIB section of the
+	// given size (square). Caller owns the returned HBITMAP (DeleteObject when done).
+	static HBITMAP CreateArgbBitmapFromIcon(HICON hIcon, int size) {
+		if (!hIcon) return nullptr;
+		static IWICImagingFactory* img_factory = nullptr;
+		if (!img_factory) {
+			if (!SUCCEEDED(::CoInitialize(0)) || !SUCCEEDED(::CoCreateInstance(CLSID_WICImagingFactory1, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&img_factory)))) {
+				return nullptr;
+			}
+		}
+
+		HBITMAP result = nullptr;
+		IWICBitmap* pBitmap = nullptr;
+		if (SUCCEEDED(img_factory->CreateBitmapFromHICON(hIcon, &pBitmap))) {
+			IWICBitmapScaler* pScaler = nullptr;
+			if (SUCCEEDED(img_factory->CreateBitmapScaler(&pScaler)) &&
+				SUCCEEDED(pScaler->Initialize(pBitmap, size, size, WICBitmapInterpolationModeFant))) {
+				IWICFormatConverter* pConverter = nullptr;
+				if (SUCCEEDED(img_factory->CreateFormatConverter(&pConverter))) {
+					if (SUCCEEDED(pConverter->Initialize(pScaler, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0f, WICBitmapPaletteTypeCustom))) {
+						BITMAPINFO bmi = { 0 };
+						bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+						bmi.bmiHeader.biWidth       = size;
+						bmi.bmiHeader.biHeight      = -size; // top-down
+						bmi.bmiHeader.biPlanes      = 1;
+						bmi.bmiHeader.biBitCount    = 32;
+						bmi.bmiHeader.biCompression = BI_RGB;
+						void* bits = nullptr;
+						result = ::CreateDIBSection(GetDC(0), &bmi, DIB_RGB_COLORS, &bits, 0, 0);
+						if (result && bits) {
+							UINT stride = size * 4;
+							if (FAILED(pConverter->CopyPixels(nullptr, stride, stride * size, (BYTE*)bits))) {
+								::DeleteObject(result);
+								result = nullptr;
+							}
+						}
+					}
+					pConverter->Release();
+				}
+				pScaler->Release();
+			}
+			pBitmap->Release();
+		}
+		return result;
+	}
+
+	// Yellow folder bitmap (used for "open menu folder" context-menu entry).
+	static HBITMAP CreateStockFolderBitmap(int size) {
+		SHSTOCKICONINFO sii = { sizeof(sii) };
+		if (FAILED(::SHGetStockIconInfo(SIID_FOLDER, SHGSI_ICON, &sii))) return nullptr;
+		HBITMAP bmp = CreateArgbBitmapFromIcon(sii.hIcon, size);
+		::DestroyIcon(sii.hIcon);
+		return bmp;
+	}
+
+	// Open-folder bitmap (used for "open shortcut location" context-menu entry).
+	static HBITMAP CreateOpenFolderBitmap(int size) {
+		SHSTOCKICONINFO sii = { sizeof(sii) };
+		if (FAILED(::SHGetStockIconInfo(SIID_FOLDEROPEN, SHGSI_ICON, &sii))) {
+			// Fall back to the closed folder icon if the open-folder stock icon is unavailable.
+			if (FAILED(::SHGetStockIconInfo(SIID_FOLDER, SHGSI_ICON, &sii))) return nullptr;
+		}
+		HBITMAP bmp = CreateArgbBitmapFromIcon(sii.hIcon, size);
+		::DestroyIcon(sii.hIcon);
+		return bmp;
+	}
+
+	// Two overlapping yellow folder glyphs suggesting a folder+subfolder tree
+	// (used for "open subfolder" context-menu entry).
+	static HBITMAP CreateFolderTreeBitmap(int size) {
+		SHSTOCKICONINFO sii = { sizeof(sii) };
+		if (FAILED(::SHGetStockIconInfo(SIID_FOLDER, SHGSI_ICON, &sii))) return nullptr;
+
+		int smallSz = (size * 11) / 16;
+		if (smallSz < 4) smallSz = 4;
+		HBITMAP smallBmp = CreateArgbBitmapFromIcon(sii.hIcon, smallSz);
+		::DestroyIcon(sii.hIcon);
+		if (!smallBmp) return nullptr;
+
+		BITMAPINFO bmi = { 0 };
+		bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+		bmi.bmiHeader.biWidth       = size;
+		bmi.bmiHeader.biHeight      = -size;
+		bmi.bmiHeader.biPlanes      = 1;
+		bmi.bmiHeader.biBitCount    = 32;
+		bmi.bmiHeader.biCompression = BI_RGB;
+		void* destBits = nullptr;
+		HBITMAP dest = ::CreateDIBSection(GetDC(0), &bmi, DIB_RGB_COLORS, &destBits, 0, 0);
+		if (dest && destBits) {
+			memset(destBits, 0, (size_t)size * size * 4);
+
+			HDC memDC = CreateCompatibleDC(nullptr);
+			HDC srcDC = CreateCompatibleDC(nullptr);
+			HGDIOBJ oldMem = SelectObject(memDC, dest);
+			HGDIOBJ oldSrc = SelectObject(srcDC, smallBmp);
+
+			BLENDFUNCTION bf{}; bf.BlendOp = AC_SRC_OVER; bf.SourceConstantAlpha = 255; bf.AlphaFormat = AC_SRC_ALPHA;
+			// back folder (upper-left)
+			AlphaBlend(memDC, 0, 0, smallSz, smallSz, srcDC, 0, 0, smallSz, smallSz, bf);
+			// front folder (lower-right), overlapping to suggest hierarchy
+			int off = size - smallSz;
+			AlphaBlend(memDC, off, off, smallSz, smallSz, srcDC, 0, 0, smallSz, smallSz, bf);
+
+			SelectObject(memDC, oldMem);
+			SelectObject(srcDC, oldSrc);
+			DeleteDC(memDC);
+			DeleteDC(srcDC);
+		}
+		DeleteObject(smallBmp);
+		return dest;
+	}
+
+	// Stacky-plus.exe's own icon (used for "open Stacky-plus folder" context-menu entry).
+	static HBITMAP CreateStackyExeBitmap(int size) {
+		HICON hIcon = (HICON)::LoadImage(GetModuleHandle(nullptr), MAKEINTRESOURCE(STACKY_ICON_ID), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+		if (!hIcon) return nullptr;
+		HBITMAP bmp = CreateArgbBitmapFromIcon(hIcon, size);
+		::DestroyIcon(hIcon);
+		return bmp;
+	}
+
+	// Red "X" cross bitmap (used for "close this context menu" entry).
+	static HBITMAP CreateRedCrossBitmap(int size) {
+		BITMAPINFO bmi = { 0 };
+		bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+		bmi.bmiHeader.biWidth       = size;
+		bmi.bmiHeader.biHeight      = -size; // top-down
+		bmi.bmiHeader.biPlanes      = 1;
+		bmi.bmiHeader.biBitCount    = 32;
+		bmi.bmiHeader.biCompression = BI_RGB;
+		BYTE* bits = nullptr;
+		HBITMAP dest = ::CreateDIBSection(GetDC(0), &bmi, DIB_RGB_COLORS, (void**)&bits, 0, 0);
+		if (!dest || !bits) return dest;
+		memset(bits, 0, (size_t)size * size * 4);
+
+		HDC memDC = CreateCompatibleDC(nullptr);
+		HGDIOBJ oldBmp = SelectObject(memDC, dest);
+
+		int penW = max(1, size / 8);
+		HPEN pen = CreatePen(PS_SOLID, penW, RGB(200, 0, 0));
+		HGDIOBJ oldPen = SelectObject(memDC, pen);
+
+		int m = (int)(size * 0.22);
+		MoveToEx(memDC, m, m, nullptr);
+		LineTo(memDC, size - m, size - m);
+		MoveToEx(memDC, size - m, m, nullptr);
+		LineTo(memDC, m, size - m);
+
+		SelectObject(memDC, oldPen);
+		DeleteObject(pen);
+		SelectObject(memDC, oldBmp);
+		DeleteDC(memDC);
+
+		// GDI line drawing does not set the alpha channel; derive alpha from
+		// how far each pixel's color is from transparent black so the cross
+		// composites correctly via AlphaBlend/premultiplied-alpha menu bitmaps.
+		size_t pixelCount = (size_t)size * size;
+		for (size_t i = 0; i < pixelCount; ++i) {
+			BYTE* px = bits + i * 4; // B, G, R, A
+			BYTE maxc = max(px[0], max(px[1], px[2]));
+			BYTE alpha = maxc;
+			if (alpha == 0) continue;
+			px[0] = (BYTE)((int)px[0] * alpha / 255);
+			px[1] = (BYTE)((int)px[1] * alpha / 255);
+			px[2] = (BYTE)((int)px[2] * alpha / 255);
+			px[3] = alpha;
+		}
+
+		return dest;
+	}
+
+	// Build a 16x16-style shield icon (scaled to `size`) using the same UAC shield
+	// stock icon Windows shows for "Run as administrator" elevation prompts.
+	static HBITMAP CreateShieldBitmap(int size) {
+		SHSTOCKICONINFO sii = { sizeof(sii) };
+		if (FAILED(::SHGetStockIconInfo(SIID_SHIELD, SHGSI_ICON, &sii))) return nullptr;
+		HBITMAP bmp = CreateArgbBitmapFromIcon(sii.hIcon, size);
+		::DestroyIcon(sii.hIcon);
+		return bmp;
 	}
 };
 
@@ -1088,24 +1867,68 @@ struct Cache {
 		String  name;
 		Bmp     bmp;
 		bool    is_submenu;
+		bool    is_mini_submenu; // folder ends with .submenu-mini: force 16px icons for this submenu and its descendants
 		String  submenu_path;
 		String  relative_path; // For items in submenus
 
-		Item() : is_submenu(false) {}
+		Item() : is_submenu(false), is_mini_submenu(false) {}
 
 		bool create(const String& file_name, const String& file_path, const String& base_dir = L"") {
 			name = file_name;
 			is_submenu = false;
+			is_mini_submenu = false;
 			submenu_path.clear();
 			relative_path.clear();
 
 			DWORD attrs = ::GetFileAttributes(file_path.c_str());
 			if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
 
-				// Mark as submenu if needed
-				if (Util::ends_with(file_name, SUBMENU_SUFFIX)) {
+				// Mark as submenu if needed (both .submenu and .submenu-mini folders are submenus,
+				// including .submenu variants followed by a --singlesubmenu layout suffix)
+				if (Util::IsMiniSubmenuFolderName(file_name)) {
+					is_submenu = true;
+					is_mini_submenu = true;
+					submenu_path = file_path;
+				}
+				else if (Util::IsSubmenuFolderName(file_name)) {
 					is_submenu = true;
 					submenu_path = file_path;
+				}
+				// Hidden automatic detection: folders without an explicit
+				// submenu/layout suffix are still treated as submenus if they
+				// contain at least one shortcut/item or a nested folder. The
+				// folder name on disk is left untouched.
+				else if (Util::FolderHasShortcutOrSubfolder(file_path)) {
+					is_submenu = true;
+					submenu_path = file_path;
+				}
+
+				// Hidden per-folder ".stacky-config" (written by the
+				// Configuration window) takes priority over the folder-name
+				// suffix for the mini-icon flag, so ".submenu-mini"/".mini"
+				// suffixes are no longer required once configured via the UI.
+				StackyFolderConfig scfg = StackyFolderConfig::Load(file_path);
+				if (is_submenu && scfg.loaded) is_mini_submenu = scfg.mini_icons;
+
+				// A custom icon chosen in the Configuration window (root
+				// "menu_icon_path" or per-submenu "submenu_icon_path")
+				// takes priority over desktop.ini/the folder's own icon.
+				if (scfg.loaded) {
+					String customIconPath = is_submenu ? scfg.submenu_icon_path : scfg.menu_icon_path;
+					if (!customIconPath.empty()) {
+						if (Util::ends_with(customIconPath, L".ico") && customIconPath.find(L',') == String::npos) {
+							if (Bmp::load_ico_file_directly(customIconPath, bmp)) {
+								return true;
+							}
+						} else {
+							HICON hIcon = Bmp::extract_icon_from_path_with_index(customIconPath);
+							if (hIcon) {
+								if (Bmp::convert_file_icon(hIcon, bmp)) {
+									return true;
+								}
+							}
+						}
+					}
 				}
 
 				// For ANY folder: try custom icon from desktop.ini first
@@ -1169,6 +1992,7 @@ struct Cache {
 			if (is_submenu) {
 				buffer.load(submenu_path, true);
 			}
+			buffer.load(&is_mini_submenu, sizeof(is_mini_submenu));
 			bmp.serialize(buffer);
 		}
 		void unserialize(Buffer& buffer, size_t& pos) {
@@ -1182,6 +2006,9 @@ struct Cache {
 				submenu_path = (Char*)(buffer.data + pos);
 				pos += (submenu_path.size() + 1) * sizeof(Char);
 			}
+
+			memcpy(&is_mini_submenu, buffer.data + pos, sizeof(is_mini_submenu));
+			pos += sizeof(is_mini_submenu);
 
 			bmp.load_bits_and_headers(buffer.data + pos);
 			pos += bmp.total_size();
@@ -1223,9 +2050,12 @@ struct Cache {
 			scanned_items.push_back(full_filename);
 			update_max_modified(full_filename);
 
-			// If this is a .submenu folder, recursively scan it
+			// If this is a .submenu or .submenu-mini folder, or an automatically
+			// detected hidden submenu folder (contains shortcuts/subfolders),
+			// recursively scan it.
 			if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-				Util::ends_with(filename, SUBMENU_SUFFIX)) {
+				(Util::IsSubmenuFolderName(filename) || Util::ends_with(filename, SUBMENU_MINI_SUFFIX) ||
+				 Util::FolderHasShortcutOrSubfolder(dir_path + filename + DIR_SEP))) {
 				scan_directory(dir_path + filename + DIR_SEP, full_filename + DIR_SEP);
 			}
 		} while (FindNextFile(hfind, &ffd) != 0);
@@ -1326,6 +2156,24 @@ private:
 	}
 };
 
+// Forces an immediate rescan/rebuild of the hidden "!stacky.cache" file for
+// folderPath. Deleting the cache file alone (as the Configuration window
+// used to do) isn't enough to make the change visible the first time the
+// menu is opened afterwards: Cache::load() only rebuilds *lazily*, the next
+// time stacky-plus.exe itself scans the folder, so the very first open right
+// after a config change could still show a half-populated/no-icon menu
+// (built from a stale in-memory state) before a *second* open finally
+// reflects it. Scanning+rebuilding here, synchronously, from the
+// Configuration window itself right after saving ".stacky-config" avoids
+// that altogether: the cache on disk is already fresh and correct before the
+// menu is ever opened again.
+void RebuildStackyCache(const std::wstring& folderPath) {
+	Cache cache(folderPath);
+	if (cache.scan()) {
+		cache.load();
+	}
+}
+
 struct MenuEntry {
 	Cache::Item* item;     // points to cache item (folder or file)
 	String text;           // display text (trimmed)
@@ -1339,61 +2187,43 @@ struct MenuEntry {
  * DPI-aware icon cache for owner-draw
  **************************************************************************************************/
 struct IconCache {
-	struct Entry { HBITMAP bmp; SIZE sz; };
-	std::unordered_map<const void*, Entry> map;
+	// bmp/srcSz refer to the ORIGINAL (never modified/owned) source bitmap, while
+	// sz is the logical draw size requested for this (source, iconPx) pair. The
+	// actual scaling to sz is done at draw time via AlphaBlend, which (unlike
+	// StretchBlt in HALFTONE mode) correctly interpolates the premultiplied alpha
+	// channel. This avoids pre-scaling into a separate bitmap altogether, so we
+	// never own/delete the original Cache::Item bitmaps here.
+	struct Entry { HBITMAP bmp; SIZE srcSz; SIZE sz; };
+	struct Key {
+		const void* src;
+		int px;
+		bool operator==(const Key& o) const { return src == o.src && px == o.px; }
+	};
+	struct KeyHash {
+		size_t operator()(const Key& k) const {
+			return std::hash<const void*>()(k.src) ^ (std::hash<int>()(k.px) << 1);
+		}
+	};
+	std::unordered_map<Key, Entry, KeyHash> map;
 
-	Entry& get(HWND hwnd, HBITMAP src) {
-		auto it = map.find(src);
+	Entry& get(HWND hwnd, HBITMAP src, int iconPx = NORMAL_ICON_PX) {
+		Key key{ src, iconPx };
+		auto it = map.find(key);
 		if (it != map.end()) return it->second;
 
 		UINT dpi = GetDpiForWindow(hwnd);
-		int s = MulDiv(32, dpi, 96);
+		int s = MulDiv(iconPx, dpi, 96);
 
 		// Get source bitmap dimensions
 		BITMAP bm;
 		GetObject(src, sizeof(BITMAP), &bm);
 
-		// If already at target size, just use it as-is
-		if (bm.bmWidth == s && bm.bmHeight == s) {
-			return map[src] = { src, {s, s} };
-		}
-
-		HDC hdcSrc = CreateCompatibleDC(nullptr);
-		HBITMAP hOldSrc = (HBITMAP)SelectObject(hdcSrc, src);
-
-		// Create 32-bit ARGB DIB section to preserve alpha channel
-		BITMAPINFO bmi = {};
-		bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-		bmi.bmiHeader.biWidth = s;
-		bmi.bmiHeader.biHeight = -s; // negative for top-down
-		bmi.bmiHeader.biPlanes = 1;
-		bmi.bmiHeader.biBitCount = 32;
-		bmi.bmiHeader.biCompression = BI_RGB;
-
-		void* pBits = nullptr;
-		HBITMAP scaled = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-
-		HDC hdcDst = CreateCompatibleDC(nullptr);
-		HBITMAP hOldDst = (HBITMAP)SelectObject(hdcDst, scaled);
-
-		// Set high-quality stretching mode
-		SetStretchBltMode(hdcDst, HALFTONE);
-		SetBrushOrgEx(hdcDst, 0, 0, nullptr);
-
-		// Stretch the bitmap with high quality
-		StretchBlt(hdcDst, 0, 0, s, s, hdcSrc, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
-
-		SelectObject(hdcSrc, hOldSrc);
-		SelectObject(hdcDst, hOldDst);
-		DeleteDC(hdcSrc);
-		DeleteDC(hdcDst);
-
-		return map[src] = { scaled, {s, s} };
+		return map[key] = { src, { bm.bmWidth, bm.bmHeight }, { s, s } };
 	}
 
-	~IconCache() {
-		for (auto& kv : map) DeleteObject(kv.second.bmp);
-	}
+	// Nothing to delete: all cached bitmaps alias the original Cache::Item bitmaps,
+	// which are owned (and deleted) by Cache::Item/Bmp itself.
+	~IconCache() {}
 };
 
 /**************************************************************************************************
@@ -1403,6 +2233,10 @@ struct LazySubmenuData {
 	Cache* cache;
 	String folder_path;
 };
+
+// Forward declaration: defined later as a free helper (used by App::MaxNameWidthPx
+// for --singlesubmenu column-width measurement, and by GridWndProc/GridShowTip).
+static String GridDisplayName(const String& name, const String& prefix);
 
 /**************************************************************************************************
  * The app
@@ -1417,8 +2251,17 @@ struct App {
 			hide_header = false;
 		}
 		compact_header = options.find(L"--compact-header") != String::npos;
-		dark_mode = options.find(L"--dark-mode") != String::npos;
+		bool wantDark  = options.find(L"--dark-mode") != String::npos;
+		bool wantLight = options.find(L"--light-mode") != String::npos;
+		if (wantDark)       theme_mode = THEME_DARK;
+		else if (wantLight) theme_mode = THEME_LIGHT;
+		else                theme_mode = THEME_SYSTEM;
+		dark_mode = (theme_mode == THEME_DARK) ||
+			(theme_mode == THEME_SYSTEM && GetSystemTheme().dark);
 		mouse_position = options.find(L"--mouseposition") != String::npos;
+		mini_mode = options.find(L"--mini") != String::npos;
+		single_submenu_mode = options.find(L"--singlesubmenu") != String::npos;
+		folders_first = options.find(L"--foldersfirst") != String::npos;
 
 		// Parse iconmenu-NN / iconmenu-NN-name / iconmenu-C2
 		grid_mode = GRID_NONE;
@@ -1447,11 +2290,52 @@ struct App {
 				wchar_t* end = nullptr;
 				long n = wcstol(p, &end, 10);
 				if (end != p && n >= 1 && n <= 99) icon_cols = (int)n;
-				// check for -name suffix
-				if (end && wcsncmp(end, L"-name", 5) == 0)
+				// check for -name-right / -name suffix (check the longer one first)
+				if (end && wcsncmp(end, L"-name-right", 11) == 0)
+					grid_mode = GRID_NAME_RIGHT;
+				else if (end && wcsncmp(end, L"-name", 5) == 0)
 					grid_mode = GRID_NAME;
 				else
 					grid_mode = GRID_ICON;
+			}
+		}
+
+		// A hidden ".stacky-config" inside the root stack folder (written by
+		// the Configuration window) overrides the command-line options above,
+		// so menus configured through the UI no longer need any --argument.
+		StackyFolderConfig rootCfg = StackyFolderConfig::Load(cache->base_dir);
+		if (rootCfg.loaded) {
+			if (rootCfg.theme == SCFG_THEME_DARK)       theme_mode = THEME_DARK;
+			else if (rootCfg.theme == SCFG_THEME_LIGHT) theme_mode = THEME_LIGHT;
+			else                                        theme_mode = THEME_SYSTEM;
+			dark_mode = (theme_mode == THEME_DARK) ||
+				(theme_mode == THEME_SYSTEM && GetSystemTheme().dark);
+			mouse_position = rootCfg.mouse_position;
+			mini_mode = rootCfg.mini_icons;
+			single_submenu_mode = rootCfg.mode == SCFG_MODE_SINGLESUB;
+			folders_first = rootCfg.sort_mode == SCFG_SORT_FOLDERSFIRST;
+
+			switch (rootCfg.mode) {
+			case SCFG_MODE_ICONGRID:
+				icon_cols = rootCfg.grid_cols;
+				if (rootCfg.grid_names_right)    grid_mode = GRID_NAME_RIGHT;
+				else if (rootCfg.grid_names_below) grid_mode = GRID_NAME;
+				else                              grid_mode = GRID_ICON;
+				break;
+			case SCFG_MODE_DOUBLE_COL:
+				icon_cols = 2;
+				grid_mode = rootCfg.doublecol_names ? GRID_CASCADE_NAME : GRID_CASCADE;
+				break;
+			case SCFG_MODE_DOUBLE_ROW:
+				icon_cols = 2;
+				grid_mode = rootCfg.doublerow_names ? GRID_F2_NAME : GRID_F2;
+				break;
+			case SCFG_MODE_SINGLESUB:
+				grid_mode = GRID_NONE; // root stays as default list in --singlesubmenu
+				break;
+			default:
+				grid_mode = GRID_NONE;
+				break;
 			}
 		}
 	}
@@ -1526,6 +2410,229 @@ struct App {
 		while (GetMessage(&msg, nullptr, 0, 0)) DispatchMessage(&msg);
 	}
 
+	// Build and show the right-click context menu for a submenu-folder icon.
+	// owner: window that will own the popup (its DPI is used for icon scaling).
+	// submenu_path: absolute path of the target .submenu / .submenu-mini folder.
+	// Returns after the user picks an item (or dismisses the menu) and performs the action.
+	void ShowSubfolderContextMenu(HWND owner, const String& submenu_path) {
+		UINT dpi = GetDpiForWindow(owner);
+		int px = MulDiv(16, dpi, 96);
+		const auto& S = Util::GetSubmenuCtxMenuStrings();
+
+		HBITMAP bmpTree   = Util::CreateFolderTreeBitmap(px);
+		HBITMAP bmpFolder = Util::CreateStockFolderBitmap(px);
+		HBITMAP bmpStacky = Util::CreateStackyExeBitmap(px);
+		HBITMAP bmpCross  = Util::CreateRedCrossBitmap(px);
+
+		HMENU ctxMenu = CreatePopupMenu();
+
+		MENUITEMINFO mii{ sizeof(mii) };
+		mii.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii.dwTypeData = (LPWSTR)S.open_subfolder;
+		mii.wID = WM_CTX_OPEN_SUBFOLDER;
+		mii.hbmpItem = bmpTree;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii);
+
+		MENUITEMINFO mii2{ sizeof(mii2) };
+		mii2.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii2.dwTypeData = (LPWSTR)S.open_menu_folder;
+		mii2.wID = WM_CTX_OPEN_MENU_FOLDER;
+		mii2.hbmpItem = bmpFolder;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii2);
+
+		MENUITEMINFO mii3{ sizeof(mii3) };
+		mii3.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii3.dwTypeData = (LPWSTR)S.open_stacky_folder;
+		mii3.wID = WM_CTX_OPEN_STACKY_FOLDER;
+		mii3.hbmpItem = bmpStacky;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii3);
+
+		MENUITEMINFO sep{ sizeof(sep) };
+		sep.fMask = MIIM_FTYPE;
+		sep.fType = MFT_SEPARATOR;
+		InsertMenuItem(ctxMenu, -1, TRUE, &sep);
+
+		MENUITEMINFO mii4{ sizeof(mii4) };
+		mii4.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii4.dwTypeData = (LPWSTR)S.close_menu;
+		mii4.wID = WM_CTX_CLOSE_MENU;
+		mii4.hbmpItem = bmpCross;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii4);
+
+		Util::EnableDarkContextMenu(dark_mode);
+
+		POINT pt{}; GetCursorPos(&pt);
+		SetForegroundWindow(owner);
+		UINT cmd = (UINT)TrackPopupMenuEx(ctxMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, owner, nullptr);
+		PostMessage(owner, WM_NULL, 0, 0); // needed so the menu dismisses correctly on some Windows versions
+
+		Util::EnableDarkContextMenu(false);
+
+		// Restore foreground/focus to the root popup/grid window (walking up through
+		// hover-child/submenu parents if needed) so it correctly receives WM_KILLFOCUS
+		// (and thus closes, cascading to any open children) on the next click outside of it.
+		RestoreFocusToRootMenuWindow(owner);
+
+		DestroyMenu(ctxMenu);
+		if (bmpTree)   DeleteObject(bmpTree);
+		if (bmpFolder) DeleteObject(bmpFolder);
+		if (bmpStacky) DeleteObject(bmpStacky);
+		if (bmpCross)  DeleteObject(bmpCross);
+
+		switch (cmd) {
+		case WM_CTX_OPEN_SUBFOLDER:
+			ShellExecute(nullptr, nullptr, submenu_path.c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		case WM_CTX_OPEN_MENU_FOLDER:
+			ShellExecute(nullptr, nullptr, cache->path().c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		case WM_CTX_OPEN_STACKY_FOLDER:
+			ShellExecute(nullptr, nullptr, Util::GetExeFolder().c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		case WM_CTX_CLOSE_MENU:
+			// Intentionally no-op: the context menu is already closed at this point
+			// (TrackPopupMenuEx returned) and the owning popup/grid window is left untouched.
+			break;
+		default:
+			break;
+		}
+	}
+
+	// Build and show the right-click context menu for a shortcut (non-submenu) icon.
+	// owner: window that will own the popup (its DPI is used for icon scaling).
+	// shortcut_path: absolute path of the target shortcut/file.
+	// Returns after the user picks an item (or dismisses the menu) and performs the action.
+	void ShowShortcutContextMenu(HWND owner, const String& shortcut_path) {
+		UINT dpi = GetDpiForWindow(owner);
+		int px = MulDiv(16, dpi, 96);
+		const auto& S = Util::GetSubmenuCtxMenuStrings();
+
+		// Determine the real executable target so we can offer "Run as administrator"
+		// for shortcuts (.lnk) that point to an .exe, as well as direct .exe files.
+		String targetPath = shortcut_path;
+		size_t extPos = shortcut_path.find_last_of(L'.');
+		bool isLnk = extPos != String::npos && _wcsicmp(shortcut_path.c_str() + extPos, L".lnk") == 0;
+		if (isLnk) {
+			Char resolved[MAX_PATH] = { 0 };
+			if (SUCCEEDED(Util::ResolveShortcut(owner, shortcut_path.c_str(), resolved, MAX_PATH)) && resolved[0]) {
+				targetPath = resolved;
+			}
+		}
+		size_t targetExtPos = targetPath.find_last_of(L'.');
+		bool isExe = targetExtPos != String::npos && _wcsicmp(targetPath.c_str() + targetExtPos, L".exe") == 0;
+
+		HBITMAP bmpOpenFolder = Util::CreateOpenFolderBitmap(px);
+		HBITMAP bmpFolder     = Util::CreateStockFolderBitmap(px);
+		HBITMAP bmpStacky     = Util::CreateStackyExeBitmap(px);
+		HBITMAP bmpCross      = Util::CreateRedCrossBitmap(px);
+		HBITMAP bmpShield     = isExe ? Util::CreateShieldBitmap(px) : nullptr;
+
+		HMENU ctxMenu = CreatePopupMenu();
+
+		if (isExe && bmpShield) {
+			MENUITEMINFO miiAdmin{ sizeof(miiAdmin) };
+			miiAdmin.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+			miiAdmin.dwTypeData = (LPWSTR)S.run_as_admin;
+			miiAdmin.wID = WM_CTX_RUN_AS_ADMIN;
+			miiAdmin.hbmpItem = bmpShield;
+			InsertMenuItem(ctxMenu, -1, TRUE, &miiAdmin);
+
+			MENUITEMINFO sepAdmin{ sizeof(sepAdmin) };
+			sepAdmin.fMask = MIIM_FTYPE;
+			sepAdmin.fType = MFT_SEPARATOR;
+			InsertMenuItem(ctxMenu, -1, TRUE, &sepAdmin);
+		}
+
+		MENUITEMINFO mii{ sizeof(mii) };
+		mii.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii.dwTypeData = (LPWSTR)S.open_shortcut_location;
+		mii.wID = WM_CTX_OPEN_SHORTCUT_LOCATION;
+		mii.hbmpItem = bmpOpenFolder;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii);
+
+		MENUITEMINFO mii2{ sizeof(mii2) };
+		mii2.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii2.dwTypeData = (LPWSTR)S.open_menu_folder;
+		mii2.wID = WM_CTX_OPEN_MENU_FOLDER;
+		mii2.hbmpItem = bmpFolder;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii2);
+
+		MENUITEMINFO mii3{ sizeof(mii3) };
+		mii3.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii3.dwTypeData = (LPWSTR)S.open_stacky_folder;
+		mii3.wID = WM_CTX_OPEN_STACKY_FOLDER;
+		mii3.hbmpItem = bmpStacky;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii3);
+
+		MENUITEMINFO sep{ sizeof(sep) };
+		sep.fMask = MIIM_FTYPE;
+		sep.fType = MFT_SEPARATOR;
+		InsertMenuItem(ctxMenu, -1, TRUE, &sep);
+
+		MENUITEMINFO mii4{ sizeof(mii4) };
+		mii4.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		mii4.dwTypeData = (LPWSTR)S.close_menu;
+		mii4.wID = WM_CTX_CLOSE_MENU;
+		mii4.hbmpItem = bmpCross;
+		InsertMenuItem(ctxMenu, -1, TRUE, &mii4);
+
+		Util::EnableDarkContextMenu(dark_mode);
+
+		POINT pt{}; GetCursorPos(&pt);
+		SetForegroundWindow(owner);
+		UINT cmd = (UINT)TrackPopupMenuEx(ctxMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, owner, nullptr);
+		PostMessage(owner, WM_NULL, 0, 0); // needed so the menu dismisses correctly on some Windows versions
+
+		Util::EnableDarkContextMenu(false);
+
+		// Restore foreground/focus to the root popup/grid window (walking up through
+		// hover-child/submenu parents if needed) so it correctly receives WM_KILLFOCUS
+		// (and thus closes, cascading to any open children) on the next click outside of it.
+		RestoreFocusToRootMenuWindow(owner);
+
+		DestroyMenu(ctxMenu);
+		if (bmpOpenFolder) DeleteObject(bmpOpenFolder);
+		if (bmpFolder)     DeleteObject(bmpFolder);
+		if (bmpStacky)     DeleteObject(bmpStacky);
+		if (bmpCross)      DeleteObject(bmpCross);
+		if (bmpShield)     DeleteObject(bmpShield);
+
+		switch (cmd) {
+		case WM_CTX_RUN_AS_ADMIN: {
+			SHELLEXECUTEINFO sei{ sizeof(sei) };
+			sei.fMask = SEE_MASK_DEFAULT;
+			sei.hwnd = owner;
+			sei.lpVerb = L"runas";
+			sei.lpFile = targetPath.c_str();
+			size_t tpos = targetPath.find_last_of(L"\\/");
+			String tfolder = (tpos == String::npos) ? String() : targetPath.substr(0, tpos);
+			sei.lpDirectory = tfolder.empty() ? nullptr : tfolder.c_str();
+			sei.nShow = SW_NORMAL;
+			ShellExecuteEx(&sei);
+			break;
+		}
+		case WM_CTX_OPEN_SHORTCUT_LOCATION: {
+			String p = shortcut_path;
+			size_t pos = p.find_last_of(L"\\/");
+			String folder = (pos == String::npos) ? cache->path() : p.substr(0, pos);
+			ShellExecute(nullptr, nullptr, folder.c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		}
+		case WM_CTX_OPEN_MENU_FOLDER:
+			ShellExecute(nullptr, nullptr, cache->path().c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		case WM_CTX_OPEN_STACKY_FOLDER:
+			ShellExecute(nullptr, nullptr, Util::GetExeFolder().c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		case WM_CTX_CLOSE_MENU:
+			// Intentionally no-op: the context menu is already closed at this point
+			// (TrackPopupMenuEx returned) and the owning popup/grid window is left untouched.
+			break;
+		default:
+			break;
+		}
+	}
+
 	friend LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	friend LRESULT CALLBACK GridWndProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	friend LRESULT CALLBACK TipWndProc  (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -1534,8 +2641,227 @@ struct App {
 	Cache*    cache;
 	IconCache icon_cache;
 	bool      dark_mode;
+	ThemeMode theme_mode = THEME_SYSTEM;
 	GridMode  grid_mode;
 	int       icon_cols;
+	bool      mini_mode; // --mini: force 16px icons for every menu/submenu
+	bool      single_submenu_mode; // --singlesubmenu: root menu identical to default, submenus become
+									// flat icon-grids (no nested submenus) with per-folder layout variants
+	bool      folders_first; // --foldersfirst: .submenu folders listed before plain shortcuts, alphabetically within each group	// Effective selection/highlight color: system accent when following the
+	// system theme, otherwise the fixed dark/light selection colors already
+	// used elsewhere. Accent is only read once (cached in g_sysTheme) and
+	// refreshed on system change notifications.
+	// --light-mode ignores the Windows accent color entirely and always uses
+	// the fixed hover color #E5E5E5.
+	COLORREF SelectionColor() const {
+		if (theme_mode == THEME_LIGHT) return RGB(0xE5, 0xE5, 0xE5);
+		if (theme_mode == THEME_SYSTEM) return GetSystemTheme().accent;
+		return dark_mode ? RGB(64, 64, 64) : GetSysColor(COLOR_HIGHLIGHT);
+	}
+
+	// Effective menu/submenu background color. --light-mode always uses the
+	// fixed color #F9F9F9 instead of the system menu color.
+	COLORREF BackgroundColor() const {
+		if (theme_mode == THEME_LIGHT) return RGB(0xF9, 0xF9, 0xF9);
+		return dark_mode ? RGB(32, 32, 32) : GetSysColor(COLOR_MENU);
+	}
+
+	// Text color to use over the selection/hover background. --light-mode uses
+	// the fixed hover background (#E5E5E5) which is near-white, so the
+	// highlighted text must stay dark instead of using COLOR_HIGHLIGHTTEXT
+	// (typically white), otherwise it becomes invisible.
+	COLORREF SelectionTextColor() const {
+		if (theme_mode == THEME_LIGHT) return RGB(0, 0, 0);
+		return dark_mode ? RGB(255, 255, 255) : GetSysColor(COLOR_HIGHLIGHTTEXT);
+	}
+
+	// Returns true if the menu identified by `prefix` ("" =root) should use mini (16px)
+	// icons: either --mini was passed on the command line, or the prefix chain
+	// contains a folder ending in .submenu-mini (which propagates to all descendants).
+	bool IsMiniPrefix(const String& prefix) const {
+		if (mini_mode) return true;
+		if (prefix.empty()) return false;
+		// prefix looks like "Foo.submenu\\Bar.submenu-mini\\"; check each ancestor
+		// folder name (the cache item whose name+DIR_SEP is a leading segment of prefix).
+		for (auto& ci : cache->items) {
+			if (!ci.is_submenu) continue;
+			String withSep = ci.name + DIR_SEP;
+			if (prefix.rfind(withSep, 0) == 0 && ci.is_mini_submenu) return true;
+		}
+		return false;
+	}
+
+	// Icon size (in logical px, before DPI scaling) to use for a given menu prefix.
+	int IconPxFor(const String& prefix) const {
+		return IsMiniPrefix(prefix) ? MINI_ICON_PX : NORMAL_ICON_PX;
+	}
+
+	// --singlesubmenu variant selection.
+	struct SubmenuVariant {
+		GridMode mode;
+		int      cols;
+	};
+
+	// Parses --singlesubmenu layout from the folder leaf name:
+	//   "Music.icononly-4"     -> { GRID_SS_ICON, 4 }
+	//   "Music.2-name-right"   -> { GRID_SS_NAME_RIGHT, 2 }
+	//   "Music.3-name-below"   -> { GRID_SS_NAME_BELOW, 3 }
+	//   "Music.submenu"        -> default { GRID_SS_ICON, 3 }
+	// ".submenu" is not required; the layout token itself marks the folder.
+	static SubmenuVariant ParseSubmenuVariantFromRawName(const String& rawName) {
+		SubmenuVariant result{ GRID_SS_ICON, 3 };
+		String leaf = Util::LastPathSegment(rawName);
+		auto parsed = Util::ParseSSLayout(leaf);
+		if (parsed.kind == Util::SS_LAYOUT_NAME_RIGHT) {
+			result.mode = GRID_SS_NAME_RIGHT;
+			result.cols = parsed.cols;
+		} else if (parsed.kind == Util::SS_LAYOUT_NAME_BELOW) {
+			result.mode = GRID_SS_NAME_BELOW;
+			result.cols = parsed.cols;
+		} else if (parsed.kind == Util::SS_LAYOUT_ICON) {
+			result.mode = GRID_SS_ICON;
+			result.cols = parsed.cols;
+		}
+		return result;
+	}
+
+	// Finds the .submenu Cache::Item whose relative prefix matches and returns
+	// its parsed layout variant. prefix looks like "Folder.submenu\\".
+	// A hidden ".stacky-config" inside the folder (written by the
+	// Configuration window) takes priority over the folder-name layout
+	// suffix (.icononly-NN / .NN-name-right / .NN-name-below), so the
+	// suffix is no longer required once configured via the UI.
+	SubmenuVariant SubmenuVariantFor(const String& prefix) const {
+		if (!prefix.empty()) {
+			String withoutSep = prefix.substr(0, prefix.size() - String(DIR_SEP).size());
+			for (auto& ci : cache->items) {
+				if (ci.is_submenu && ci.name == withoutSep) {
+					StackyFolderConfig scfg = StackyFolderConfig::Load(cache->path(ci.name));
+					if (scfg.loaded) {
+						SubmenuVariant result{ GRID_SS_ICON, scfg.submenu_cols };
+						if (scfg.submenu_layout == SCFG_LAYOUT_NAME_RIGHT) result.mode = GRID_SS_NAME_RIGHT;
+						else if (scfg.submenu_layout == SCFG_LAYOUT_NAME_BELOW) result.mode = GRID_SS_NAME_BELOW;
+						else result.mode = GRID_SS_ICON;
+						return result;
+					}
+					return ParseSubmenuVariantFromRawName(ci.name);
+				}
+			}
+		}
+		return SubmenuVariant{ GRID_SS_ICON, 3 };
+	}
+
+	// The grid mode/columns actually in effect for a given prefix. In --singlesubmenu
+	// mode, every non-root submenu (prefix non-empty) uses its own per-folder layout
+	// variant instead of the app-wide grid_mode/icon_cols (root stays untouched).
+	GridMode EffectiveGridMode(const String& prefix) const {
+		if (single_submenu_mode && !prefix.empty()) return SubmenuVariantFor(prefix).mode;
+		return grid_mode;
+	}
+	int EffectiveIconCols(const String& prefix) const {
+		if (single_submenu_mode && !prefix.empty()) return SubmenuVariantFor(prefix).cols;
+		return icon_cols;
+	}
+
+	// --foldersfirst: display key for a cache item used to compare items alphabetically
+	// (sort-prefix, .submenu suffix, and known extensions stripped, so ordering matches
+	// what the user actually sees in the menu).
+	String SortKeyFor(const Cache::Item& it) const {
+		String s = Util::LastPathSegment(it.name);
+		s = Util::StripSortPrefix(s);
+		if (it.is_submenu) {
+			s = Util::StripSubmenuSuffix(s);
+		} else {
+			for (auto& ext : { L".lnk", L".bat", L".cmd", L".exe", L".vbs", L".url" })
+				if (Util::ends_with(s, ext)) { s = Util::rtrim(s, ext); break; }
+		}
+		return s;
+	}
+
+	// --foldersfirst comparator: .submenu folders sort before plain shortcuts;
+	// within each group, items are compared alphabetically (case-insensitive).
+	bool FoldersFirstLess(size_t ai, size_t bi) const {
+		auto& a = cache->items[ai];
+		auto& b = cache->items[bi];
+		if (a.is_submenu != b.is_submenu) return a.is_submenu;
+		return _wcsicmp(SortKeyFor(a).c_str(), SortKeyFor(b).c_str()) < 0;
+	}
+
+	// Returns true if the menu/submenu identified by `prefix` ("" = root) has
+	// "AGREGAR SEPARADOR DE SUBMENÃšS Y ACCESOS DIRECTOS SIMPLES" enabled in
+	// its .stacky-config, so a separator should be drawn automatically below
+	// the last submenu folder item, before the plain shortcut items.
+	bool AddSeparatorEnabled(const String& prefix) const {
+		String folder = prefix.empty() ? cache->base_dir : cache->path(Util::rtrim(prefix, DIR_SEP));
+		StackyFolderConfig cfg = StackyFolderConfig::Load(folder);
+		return cfg.loaded && cfg.add_separator;
+	}
+
+	// Ordered list of direct-child item indices for the owner-drawn popup menu
+	// (default and --singlesubmenu modes, non-grid rendering) at the given
+	// prefix ("" = root). This is what MeasureMenuSize/WM_PAINT/WM_MOUSEMOVE/
+	// WM_LBUTTONDOWN/WM_RBUTTONDOWN must all iterate over so the visible order
+	// matches --foldersfirst; separators are kept inline in scan order when
+	// --foldersfirst is off (matching build_root_menu/build_submenu), and
+	// dropped when it's on (also matching them).
+	// Sentinel index meaning "auto-inserted separator" (not backed by a real
+	// cache item), used by AddSeparatorEnabled() grouping below. Consumers
+	// (MeasureMenuSize/WM_PAINT/WM_MOUSEMOVE/WM_LBUTTONDOWN/WM_RBUTTONDOWN)
+	// must check for this value before indexing cache->items.
+	static constexpr size_t kAutoSepIndex = (size_t)-1;
+
+	std::vector<size_t> PopupItems(const String& prefix) const {
+		std::vector<size_t> v;
+		bool isRoot = prefix.empty();
+		for (size_t i = (isRoot ? 1 : 0); i < cache->items.size(); ++i) {
+			auto& it = cache->items[i];
+			if (isRoot) {
+				if (it.name.find(DIR_SEP) != String::npos) continue;
+			} else {
+				if (it.name.rfind(prefix, 0) != 0) continue;
+				String rel = it.name.substr(prefix.size());
+				if (rel.empty()) continue;
+				if (rel.find(DIR_SEP) != String::npos) continue;
+			}
+			if (IsSeparatorFile(it.name)) {
+				if (!folders_first) v.push_back(i);
+				continue;
+			}
+			// --singlesubmenu: at the root, hide a submenu folder (.icononly-NN /
+			// .NN-name-right / .NN-name-below) that only contains nested submenu
+			// folders (no direct plain shortcuts), matching build_root_menu/GridItems.
+			if (single_submenu_mode && isRoot && it.is_submenu) {
+				String childPrefix = it.name + DIR_SEP;
+				if (!SubmenuHasDirectPlainItem(childPrefix)) continue;
+			}
+			v.push_back(i);
+		}
+		if (folders_first) {
+			std::sort(v.begin(), v.end(),
+				[this](size_t a, size_t b) { return FoldersFirstLess(a, b); });
+		}
+
+		// "Agregar separador de submenÃºs y accesos directos simples": groups
+		// submenu folders before plain shortcuts (if not already grouped by
+		// --foldersfirst) and inserts an auto separator between the two
+		// groups, matching build_root_menu()/build_submenu(). Note: even
+		// when --foldersfirst already sorts submenus before plain shortcuts,
+		// it does not draw a separator line by itself, so the auto separator
+		// must still be inserted in that case too.
+		if (AddSeparatorEnabled(prefix)) {
+			if (!folders_first) {
+				std::stable_partition(v.begin(), v.end(),
+					[this](size_t i) { return cache->items[i].is_submenu; });
+			}
+			for (size_t p = 1; p < v.size(); ++p) {
+				if (!cache->items[v[p]].is_submenu && cache->items[v[p - 1]].is_submenu) {
+					v.insert(v.begin() + p, kAutoSepIndex);
+					break;
+				}
+			}
+		}
+		return v;
+	}
 
 private:
 	HWND    window;
@@ -1568,7 +2894,7 @@ private:
 			// (top-left corner of the menu at the cursor), clamped to the work area.
 			POINT cursor{};
 			GetCursorPos(&cursor);
-			HMONITOR hMonitor = ::MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+			HMONITOR hMonitor = ::MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
 			RECT workArea = Util::GetWorkAreaForMonitor(hMonitor);
 
 			int menuX = cursor.x;
@@ -1584,9 +2910,14 @@ private:
 			return;
 		}
 
-		RECT taskbarRect = Util::GetTaskbarRect();
-
-		HMONITOR hMonitor = ::MonitorFromRect(&taskbarRect, MONITOR_DEFAULTTOPRIMARY);
+		// Determine which monitor the cursor (= clicked taskbar icon) is on, so
+		// the menu opens above the taskbar segment on THAT monitor rather than
+		// always the primary monitor's taskbar (multi-monitor setups can have
+		// the pinned shortcut visible - and clicked - on any monitor).
+		POINT cursor{};
+		GetCursorPos(&cursor);
+		HMONITOR hMonitor = ::MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+		RECT taskbarRect = Util::GetTaskbarRectForMonitor(hMonitor);
 		RECT workArea = Util::GetWorkAreaForMonitor(hMonitor);
 
 		// Y: bottom of menu aligns with top of taskbar
@@ -1594,8 +2925,6 @@ private:
 		if (menuY < workArea.top) menuY = workArea.top;
 
 		// X: center menu over cursor (cursor is over the taskbar icon at launch)
-		POINT cursor{};
-		GetCursorPos(&cursor);
 		int menuX = cursor.x - menuWidth / 2;
 
 		// Clamp X to work area
@@ -1652,7 +2981,7 @@ private:
 	struct MenuSize { int w; int h; };
 	MenuSize MeasureMenuSize(const String& prefix = L"") {
 		UINT dpi = GetDpiForWindow(window);
-		int iconSz    = MulDiv(32, dpi, 96);  // matches IconCache and MakeLayout
+		int iconSz    = MulDiv(IconPxFor(prefix), dpi, 96);  // matches IconCache and MakeLayout
 		int vPad      = MulDiv(6,  dpi, 96) * 9 / 10;
 		int hPad      = MulDiv(8,  dpi, 96);
 		int iconGap   = MulDiv(8,  dpi, 96);
@@ -1685,17 +3014,9 @@ private:
 			totalH += itemH + sepH;
 		}
 
-		for (size_t i = (isRoot ? 1 : 0); i < cache->items.size(); ++i) {
+		for (size_t i : PopupItems(prefix)) {
+			if (i == kAutoSepIndex) { totalH += sepH; continue; }
 			auto& ci = cache->items[i];
-
-			if (isRoot) {
-				if (ci.name.find(DIR_SEP) != String::npos) continue;
-			} else {
-				if (ci.name.rfind(prefix, 0) != 0) continue;
-				String rel = ci.name.substr(prefix.size());
-				if (rel.empty()) continue;
-				if (rel.find(DIR_SEP) != String::npos) continue; // skip non-direct children
-			}
 
 			if (IsSeparatorFile(ci.name)) {
 					totalH += sepH;
@@ -1705,8 +3026,8 @@ private:
 			String disp = ci.name;
 			if (!isRoot) disp = ci.name.substr(prefix.size());
 			disp = Util::StripSortPrefix(disp);
-			if (Util::ends_with(disp, SUBMENU_SUFFIX))
-				disp = Util::rtrim(disp, SUBMENU_SUFFIX);
+			if (ci.is_submenu)
+				disp = Util::StripSubmenuSuffix(disp);
 			else
 				for (auto& ext : { L".lnk", L".bat", L".cmd", L".exe", L".vbs", L".url" })
 					if (Util::ends_with(disp, ext)) { disp = Util::rtrim(disp, ext); break; }
@@ -1743,6 +3064,7 @@ public:
 	std::vector<size_t> GridItems(const String& prefix = L"") const {
 		std::vector<size_t> v;
 		bool isRoot = prefix.empty();
+		GridMode effMode = EffectiveGridMode(prefix);
 		for (size_t i = 1; i < cache->items.size(); ++i) {
 			auto& ci = cache->items[i];
 			if (isRoot) {
@@ -1754,10 +3076,24 @@ public:
 				if (rel.find(DIR_SEP) != String::npos) continue;
 			}
 				if (IsSeparatorFile(ci.name)) continue;
-					if (ci.is_submenu && grid_mode != GRID_CASCADE && grid_mode != GRID_CASCADE_NAME && grid_mode != GRID_F2 && grid_mode != GRID_F2_NAME) continue;
+					// --singlesubmenu grids (GRID_SS_*) never show nested submenu folders:
+					// no submenu can have child submenus in this mode.
+					if (ci.is_submenu && (effMode == GRID_SS_ICON || effMode == GRID_SS_NAME_RIGHT || effMode == GRID_SS_NAME_BELOW)) continue;
+					// --singlesubmenu: at the root, hide a .submenu folder that only
+					// contains nested .submenu folders (no direct plain shortcuts).
+					if (single_submenu_mode && isRoot && ci.is_submenu) {
+						String childPrefix = ci.name + DIR_SEP;
+						if (!SubmenuHasDirectPlainItem(childPrefix)) continue;
+					}
+					if (ci.is_submenu && effMode != GRID_CASCADE && effMode != GRID_CASCADE_NAME && effMode != GRID_F2 && effMode != GRID_F2_NAME
+						&& effMode != GRID_SS_ICON && effMode != GRID_SS_NAME_RIGHT && effMode != GRID_SS_NAME_BELOW) continue;
 					v.push_back(i);
 				}
-				if (grid_mode == GRID_F2 || grid_mode == GRID_F2_NAME) {
+				if (folders_first) {
+					std::sort(v.begin(), v.end(),
+						[this](size_t a, size_t b) { return FoldersFirstLess(a, b); });
+				}
+				if (effMode == GRID_F2 || effMode == GRID_F2_NAME) {
 					std::vector<size_t> withSub, withoutSub;
 					for (auto idx : v) {
 						if (cache->items[idx].is_submenu) withSub.push_back(idx);
@@ -1766,7 +3102,7 @@ public:
 					v.clear();
 					v.insert(v.end(), withSub.begin(), withSub.end());
 					v.insert(v.end(), withoutSub.begin(), withoutSub.end());
-				} else if ((grid_mode == GRID_CASCADE || grid_mode == GRID_CASCADE_NAME) && !isRoot) {
+				} else if ((effMode == GRID_CASCADE || effMode == GRID_CASCADE_NAME) && !isRoot) {
 					// Submenu (non-root): when the multi-column layout applies (n > 2 items,
 					// mixed submenu/plain items, not all items being submenus), group all
 					// submenu items first so GridCellPos can place them (plus enough leading
@@ -1791,8 +3127,10 @@ public:
 
 	struct GridMetrics {
 		int cellSz;   // icon-area side = iconSz + cellPad*2
+		int cellW;    // actual column width used for x-stepping (== cellSz except for
+					  // GRID_SS_NAME_RIGHT / GRID_SS_NAME_BELOW, which are wider)
 		int cellPad;  // padding around icon inside cell
-		int labelH;   // extra height for name label (0 unless GRID_NAME)
+		int labelH;   // extra height for name label (0 unless GRID_NAME / GRID_SS_NAME_BELOW)
 		int cellH;    // total cell height = cellSz + labelH
 		int cols;
 		int rows;
@@ -1803,22 +3141,82 @@ public:
 						 // subTwoCol mode: number of items placed in the submenu column.
 		int topPad;      // GRID_F2 only: extra space reserved above row 0 for the upward submenu triangle
 		bool subTwoCol;  // GRID_CASCADE/GRID_CASCADE_NAME submenus only: laid out in 2 columns
-					 // (submenu items grouped in one column, plain items in the other)
+						 // (submenu items grouped in one column, plain items in the other)
 	};
+
+	// Returns the width (in device pixels, at the given dpi) of the widest display
+	// name among the grid items for `prefix`, measured with the main-menu font, and
+	// the max/actual number of text lines used (1 for SS_NAME_RIGHT, 1-2 for SS_NAME_BELOW).
+	int MaxNameWidthPx(const std::vector<size_t>& its, const String& prefix, HDC hdc) const {
+		int maxW = 0;
+		for (auto idx : its) {
+			String disp = GridDisplayName(cache->items[idx].name, prefix);
+			SIZE ts{};
+			GetTextExtentPoint32(hdc, disp.c_str(), (int)disp.size(), &ts);
+			if (ts.cx > maxW) maxW = ts.cx;
+		}
+		return maxW;
+	}
 
 	// Measure grid for a given prefix (root = empty).
 	GridMetrics MeasureGridSize(const String& prefix = L"") const {
 		UINT dpi    = GetDpiForWindow(window);
-		int iconSz  = MulDiv(32, dpi, 96);
+		GridMode effMode = EffectiveGridMode(prefix);
+		int iconSz  = MulDiv(IconPxFor(prefix), dpi, 96);
 		int cellPad = MulDiv(8,  dpi, 96);
 		int cellSz  = iconSz + cellPad * 2;
-		int labelH  = (grid_mode == GRID_NAME || grid_mode == GRID_CASCADE_NAME || grid_mode == GRID_F2_NAME) ? MulDiv(16, dpi, 96) : 0;
+		int labelH  = (effMode == GRID_NAME || effMode == GRID_CASCADE_NAME || effMode == GRID_F2_NAME) ? MulDiv(16, dpi, 96) : 0;
+		int cellW   = cellSz;
 		int cellH   = cellSz + labelH;
 		auto its    = GridItems(prefix);
 		int n       = (int)its.size();
 		int cols, rows, f2Row1Count;
 		bool subTwoCol = false;
-		if ((grid_mode == GRID_CASCADE || grid_mode == GRID_CASCADE_NAME) && !prefix.empty()) {
+
+		if (effMode == GRID_SS_NAME_RIGHT || effMode == GRID_NAME_RIGHT) {
+			cols = EffectiveIconCols(prefix);
+			if (cols < 1) cols = 1;
+			rows = n > 0 ? (n + cols - 1) / cols : 1;
+			f2Row1Count = cols;
+			HDC hdc = GetDC(window);
+			NONCLIENTMETRICS ncm{}; ncm.cbSize = sizeof(ncm);
+			SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+			ncm.lfMenuFont.lfWeight = FW_NORMAL;
+			HFONT hf = CreateFontIndirect(&ncm.lfMenuFont);
+			HGDIOBJ oldF = SelectObject(hdc, hf);
+			int maxTextW = MaxNameWidthPx(its, prefix, hdc);
+			SelectObject(hdc, oldF); DeleteObject(hf); ReleaseDC(window, hdc);
+			int maxAllowed = MulDiv(200, dpi, 96);
+			int textW = (maxTextW > maxAllowed) ? maxAllowed : maxTextW;
+			int textGap = 0;
+			int rightPad = MulDiv(8, dpi, 96); // keep the name from touching the submenu's right border
+			cellW = cellSz + textGap + textW;
+			return { cellSz, cellW, cellPad, labelH, cellSz, cols, rows, cellW * cols + rightPad, cellSz * rows, f2Row1Count, 0, false };
+		} else if (effMode == GRID_SS_NAME_BELOW) {
+			cols = EffectiveIconCols(prefix);
+			if (cols < 1) cols = 1;
+			rows = n > 0 ? (n + cols - 1) / cols : 1;
+			f2Row1Count = cols;
+			int sidePad = MulDiv(24, dpi, 96);
+			int topGap  = MulDiv(8,  dpi, 96);
+			HDC hdc = GetDC(window);
+			NONCLIENTMETRICS ncm{}; ncm.cbSize = sizeof(ncm);
+			SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+			ncm.lfMenuFont.lfWeight = FW_NORMAL;
+			HFONT hf = CreateFontIndirect(&ncm.lfMenuFont);
+			HGDIOBJ oldF = SelectObject(hdc, hf);
+			TEXTMETRIC tm{}; GetTextMetrics(hdc, &tm);
+			SelectObject(hdc, oldF); DeleteObject(hf); ReleaseDC(window, hdc);
+			int lineH = tm.tmHeight + tm.tmExternalLeading;
+			int nameH = lineH; // single line only
+			int bottomPad = MulDiv(8, dpi, 96); // keep names from touching the submenu's bottom border
+			cellW = iconSz + sidePad * 2;
+			int cellSzHere = iconSz + topGap; // icon area incl. top gap (icon is drawn below the gap)
+			cellH = cellSzHere + nameH;
+			return { cellSzHere, cellW, sidePad, nameH, cellH, cols, rows, cellW * cols, cellH * rows + bottomPad, f2Row1Count, 0, false };
+		}
+
+		if ((effMode == GRID_CASCADE || effMode == GRID_CASCADE_NAME) && !prefix.empty()) {
 			// Submenu (non-root) layout:
 			// - 2 items, or all items have a submenu -> single column.
 			// - No items have a submenu -> plain 2-column grid (column-major wrapping).
@@ -1889,12 +3287,13 @@ public:
 				rows = 2;
 			}
 		} else {
-			cols = icon_cols;
+			cols = EffectiveIconCols(prefix);
+			if (cols < 1) cols = 1;
 			rows = n > 0 ? (n + cols - 1) / cols : 1;
 			f2Row1Count = cols; // unused outside GRID_F2
 		}
 		int topPad = 0; // GRID_F2 no longer reserves extra space; triangle is drawn inside the cell.
-		return { cellSz, cellPad, labelH, cellH, cols, rows, cellSz * cols, cellH * rows + topPad, f2Row1Count, topPad, subTwoCol };
+		return { cellSz, cellW, cellPad, labelH, cellH, cols, rows, cellSz * cols, cellH * rows + topPad, f2Row1Count, topPad, subTwoCol };
 	}
 
 	// Create params passed to GridWndProc for both root and submenu grids.
@@ -1992,6 +3391,26 @@ public:
 		return Util::ends_with(name, L".separator");
 	}
 
+	// --singlesubmenu: returns true if the submenu folder identified by
+	// `prefix` (e.g. "Apps.submenu\\") has at least one direct-child item
+	// that is a plain shortcut (not itself a .submenu folder, not a separator).
+	// Used to decide whether a root-level .submenu folder should be hidden
+	// (when it contains only nested .submenu folders) or shown (when it has
+	// at least one simple shortcut alongside possible nested submenus).
+	bool SubmenuHasDirectPlainItem(const String& prefix) const {
+		for (size_t i = 1; i < cache->items.size(); ++i) {
+			auto& ci = cache->items[i];
+			if (ci.name.rfind(prefix, 0) != 0) continue;
+			String rel = ci.name.substr(prefix.size());
+			if (rel.empty()) continue;
+			if (rel.find(DIR_SEP) != String::npos) continue; // only direct children
+			if (IsSeparatorFile(ci.name)) continue;
+			if (ci.is_submenu) continue; // a nested .submenu folder, not a plain shortcut
+			return true;
+		}
+		return false;
+	}
+
 	void build_root_menu(HMENU menu) {
 		if (!hide_header && cache->items.size() >= 1) {
 			auto* e = new MenuEntry{};
@@ -2014,6 +3433,11 @@ public:
 			InsertSeparator(menu);
 		}
 
+		// Collect eligible root-level indices first (so --foldersfirst can reorder
+		// them before menu items are actually inserted). When --foldersfirst is
+		// off, items are inserted (and separators placed) in the original scan
+		// order, exactly as before.
+		std::vector<size_t> rootIdx;
 		for (size_t i = 1; i < cache->items.size(); ++i) {
 			auto& it = cache->items[i];
 
@@ -2021,8 +3445,45 @@ public:
 			if (it.name.find(DIR_SEP) != String::npos) continue;
 
 			if (IsSeparatorFile(it.name)) {
-				InsertSeparator(menu);
+				if (!folders_first) InsertSeparator(menu);
 				continue;
+			}
+
+			// --singlesubmenu: hide a .submenu folder from the main menu if it
+			// contains only nested .submenu folders (no direct plain shortcuts).
+			if (single_submenu_mode && it.is_submenu) {
+				String childPrefix = it.name + DIR_SEP;
+				if (!SubmenuHasDirectPlainItem(childPrefix)) continue;
+			}
+
+			rootIdx.push_back(i);
+		}
+		if (folders_first) {
+			std::sort(rootIdx.begin(), rootIdx.end(),
+				[this](size_t a, size_t b) { return FoldersFirstLess(a, b); });
+		}
+
+		// "Agregar separador de submenÃºs y accesos directos simples": groups
+		// submenu folders before plain shortcuts (if not already grouped by
+		// --foldersfirst) and inserts a separator between the two groups.
+		// Even when --foldersfirst already sorts submenus before plain
+		// shortcuts, it doesn't draw a separator line by itself, so the
+		// auto separator insertion below must still run in that case.
+		bool addSep = AddSeparatorEnabled(L"");
+		if (addSep && !folders_first) {
+			std::stable_partition(rootIdx.begin(), rootIdx.end(),
+				[this](size_t i) { return cache->items[i].is_submenu; });
+		}
+
+		bool insertedAutoSep = false;
+		for (size_t idxPos = 0; idxPos < rootIdx.size(); ++idxPos) {
+			size_t i = rootIdx[idxPos];
+			auto& it = cache->items[i];
+
+			if (addSep && !insertedAutoSep && !it.is_submenu && idxPos > 0 &&
+				cache->items[rootIdx[idxPos - 1]].is_submenu) {
+				InsertSeparator(menu);
+				insertedAutoSep = true;
 			}
 
 			// create MenuEntry once; never store mixed pointer types
@@ -2034,7 +3495,7 @@ public:
 			// display text
 			if (it.is_submenu) {
 				String t = it.name;
-				t = Util::rtrim(t, SUBMENU_SUFFIX);
+				t = Util::StripSubmenuSuffix(t);
 				e->text = t;
 				e->submenu_prefix = it.name + DIR_SEP; // RELATIVE prefix!
 			}
@@ -2067,6 +3528,7 @@ public:
 	}
 
 	void build_submenu(HMENU menu, const String& prefix) {
+		std::vector<size_t> idx;
 		for (size_t i = 0; i < cache->items.size(); ++i) {
 			auto& it = cache->items[i];
 
@@ -2076,12 +3538,41 @@ public:
 			String rel = it.name.substr(prefix.size());
 
 			if (IsSeparatorFile(rel)) {
-				InsertSeparator(menu);
+				if (!folders_first) InsertSeparator(menu);
 				continue;
 			}
 
 			// direct children only (unless it.is_submenu)
 			if (!it.is_submenu && rel.find(DIR_SEP) != String::npos) continue;
+
+			// --singlesubmenu: nested .submenu folders are never shown inside
+			// another submenu (no submenu can have child submenus in this mode).
+			if (single_submenu_mode && it.is_submenu) continue;
+
+			idx.push_back(i);
+		}
+		if (folders_first) {
+			std::sort(idx.begin(), idx.end(),
+				[this](size_t a, size_t b) { return FoldersFirstLess(a, b); });
+		}
+
+		bool addSep = AddSeparatorEnabled(prefix);
+		if (addSep && !folders_first) {
+			std::stable_partition(idx.begin(), idx.end(),
+				[this](size_t i) { return cache->items[i].is_submenu; });
+		}
+
+		bool insertedAutoSep = false;
+		for (size_t idxPos = 0; idxPos < idx.size(); ++idxPos) {
+			size_t i = idx[idxPos];
+			auto& it = cache->items[i];
+			String rel = it.name.substr(prefix.size());
+
+			if (addSep && !insertedAutoSep && !it.is_submenu && idxPos > 0 &&
+				cache->items[idx[idxPos - 1]].is_submenu) {
+				InsertSeparator(menu);
+				insertedAutoSep = true;
+			}
 
 			auto* e = new MenuEntry{};
 			e->item = &it;
@@ -2091,7 +3582,7 @@ public:
 			if (it.is_submenu) {
 				// must be direct child submenu folder
 				if (rel.find(DIR_SEP) != String::npos) { delete e; continue; }
-				e->text = Util::rtrim(rel, SUBMENU_SUFFIX);
+				e->text = Util::StripSubmenuSuffix(rel);
 				e->submenu_prefix = it.name + DIR_SEP;
 			}
 			else {
@@ -2180,7 +3671,7 @@ public:
 		auto* e = (MenuEntry*)dis->itemData;
 		// ----- SEPARATOR DRAW -----
 		if (!e) {
-			COLORREF bg = dark_mode ? RGB(32, 32, 32) : GetSysColor(COLOR_MENU);
+			COLORREF bg = BackgroundColor();
 			COLORREF line = dark_mode ? RGB(70, 70, 70) : GetSysColor(COLOR_3DSHADOW);
 
 			// Fill background
@@ -2214,13 +3705,13 @@ public:
 		const bool disab = (dis->itemState & (ODS_DISABLED | ODS_GRAYED)) != 0;
 
 		// Colors
-		const COLORREF bg = dark_mode ? RGB(32, 32, 32) : GetSysColor(COLOR_MENU);
+		const COLORREF bg = BackgroundColor();
 		const COLORREF fg = dark_mode ? RGB(240, 240, 240) : GetSysColor(COLOR_MENUTEXT);
 		const COLORREF disfg = dark_mode ? RGB(140, 140, 140) : GetSysColor(COLOR_GRAYTEXT);
 
 		// Selection colors (avoid the bright default blue in dark mode)
-		const COLORREF selBg = dark_mode ? RGB(64, 64, 64) : GetSysColor(COLOR_HIGHLIGHT);
-		const COLORREF selFg = dark_mode ? RGB(255, 255, 255) : GetSysColor(COLOR_HIGHLIGHTTEXT);
+		const COLORREF selBg = SelectionColor();
+		const COLORREF selFg = SelectionTextColor();
 
 		// Paint background
 		HBRUSH hbr = CreateSolidBrush(sel ? selBg : bg);
@@ -2241,7 +3732,7 @@ public:
 		bf.SourceConstantAlpha = disab ? 140 : 255; // slightly dim icons when disabled
 		bf.AlphaFormat = AC_SRC_ALPHA;
 
-		AlphaBlend(dis->hDC, x, y, ic.sz.cx, ic.sz.cy, mem, 0, 0, ic.sz.cx, ic.sz.cy, bf);
+		AlphaBlend(dis->hDC, x, y, ic.sz.cx, ic.sz.cy, mem, 0, 0, ic.srcSz.cx, ic.srcSz.cy, bf);
 
 		SelectObject(mem, old);
 		DeleteDC(mem);
@@ -2308,10 +3799,11 @@ public:
 				else
 				{
 					ShellExecute(nullptr, nullptr, cmd.c_str(), nullptr, nullptr, SW_NORMAL);
+					Util::RegisterRecentLaunch(cmd);
 					{
 						String web_url = Util::GetWebUrl(cmd);
 						if (!web_url.empty() && !Util::HasCustomIcon(cmd))
-							Util::TriggerFaviconDownloadAsync(app->cache->base_dir, it.name, web_url, app->cache->cache_path);
+							Util::TriggerFaviconDownloadAsync(app->cache->base_dir, it.name, web_url, app->cache->cache_path, cmd);
 					}
 				}
 			}
@@ -2350,10 +3842,10 @@ struct PopupLayout {
 	int arrowGap; // gap between text right and arrow left
 };
 
-static PopupLayout MakeLayout(HWND hwnd) {
+static PopupLayout MakeLayout(HWND hwnd, int iconPx = NORMAL_ICON_PX) {
 	PopupLayout l{};
 	l.dpi     = (int)GetDpiForWindow(hwnd);
-	l.iconSz  = MulDiv(32, l.dpi, 96);   // matches IconCache scaling
+	l.iconSz  = MulDiv(iconPx, l.dpi, 96);   // matches IconCache scaling
 	l.vPad    = MulDiv(6,  l.dpi, 96) * 9 / 10; // 10% less row height
 	l.hPad    = MulDiv(8,  l.dpi, 96);
 	l.iconGap = MulDiv(8,  l.dpi, 96);
@@ -2376,8 +3868,20 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		if (state) state->hotItem = -1;
 		return 0;
 	}
+	case WM_SETTINGCHANGE:
+	case WM_DWMCOLORIZATIONCOLORCHANGED: {
+		// System color mode/accent changed: refresh the cache and repaint if
+		// this menu is following the system theme (event-driven, no polling).
+		auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+		if (state && state->app && state->app->theme_mode == THEME_SYSTEM) {
+			RefreshSystemThemeCache();
+			state->app->dark_mode = GetSystemTheme().dark;
+			InvalidateRect(hwnd, nullptr, FALSE);
+		}
+		break;
+	}
 	case WM_ERASEBKGND:
-		return 1; // suppress – WM_PAINT fills every pixel with double-buffer
+		return 1; // suppress ï¿½ WM_PAINT fills every pixel with double-buffer
 	case WM_NCDESTROY: {
 		auto* ps = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 		if (ps) {
@@ -2412,7 +3916,7 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		HGDIOBJ oldMemBmp = SelectObject(memDC, memBmp);
 
 		if (!app) {
-			HBRUSH hbr = CreateSolidBrush(GetSysColor(COLOR_MENU));
+			HBRUSH hbr = CreateSolidBrush(app ? app->BackgroundColor() : GetSysColor(COLOR_MENU));
 			FillRect(memDC, &rc, hbr);
 			DeleteObject(hbr);
 			BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
@@ -2425,12 +3929,12 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		// From here, paint into memDC instead of hdc
 		HDC& hdc_ = memDC; // alias so the rest of the code below works unchanged
 
-		PopupLayout L = MakeLayout(hwnd);
+		PopupLayout L = MakeLayout(hwnd, app ? app->IconPxFor(prefix) : NORMAL_ICON_PX);
 
-		COLORREF bgColor    = app->dark_mode ? RGB(32,32,32)   : GetSysColor(COLOR_MENU);
-		COLORREF selColor   = app->dark_mode ? RGB(64,64,64)   : GetSysColor(COLOR_HIGHLIGHT);
+		COLORREF bgColor    = app->BackgroundColor();
+		COLORREF selColor   = app->SelectionColor();
 		COLORREF fgColor    = app->dark_mode ? RGB(240,240,240): GetSysColor(COLOR_MENUTEXT);
-		COLORREF fgSelColor = app->dark_mode ? RGB(255,255,255): GetSysColor(COLOR_HIGHLIGHTTEXT);
+		COLORREF fgSelColor = app->SelectionTextColor();
 		COLORREF sepColor   = app->dark_mode ? RGB(70,70,70)   : GetSysColor(COLOR_3DSHADOW);
 		COLORREF arrowColor = app->dark_mode ? RGB(200,200,200): RGB(0,0,0);
 
@@ -2457,12 +3961,12 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			HBRUSH hbr = CreateSolidBrush(hot ? selColor : bgColor);
 			FillRect(hdc_, &ir, hbr); DeleteObject(hbr);
 
-			auto& ic = app->icon_cache.get(hwnd, ci.bmp.hBmp);
+			auto& ic = app->icon_cache.get(hwnd, ci.bmp.hBmp, app->IconPxFor(prefix));
 			int ix = ir.left + L.hPad;
 			int iy = ir.top  + (L.itemH - ic.sz.cy) / 2;
 			HDC mem = CreateCompatibleDC(hdc_); HGDIOBJ old = SelectObject(mem, ic.bmp);
 			BLENDFUNCTION bf{}; bf.BlendOp=AC_SRC_OVER; bf.SourceConstantAlpha=255; bf.AlphaFormat=AC_SRC_ALPHA;
-			AlphaBlend(hdc_, ix, iy, ic.sz.cx, ic.sz.cy, mem, 0,0, ic.sz.cx, ic.sz.cy, bf);
+			AlphaBlend(hdc_, ix, iy, ic.sz.cx, ic.sz.cy, mem, 0,0, ic.srcSz.cx, ic.srcSz.cy, bf);
 			SelectObject(mem, old); DeleteDC(mem);
 
 			RECT tr = ir;
@@ -2483,17 +3987,18 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			y += L.sepH;
 		}
 
-		for (size_t i = (isRoot ? 1 : 0); i < app->cache->items.size(); ++i) {
-			auto& ci = app->cache->items[i];
-
-			if (isRoot) {
-				if (ci.name.find(DIR_SEP) != String::npos) continue;
-			} else {
-				if (ci.name.rfind(prefix, 0) != 0) continue;
-				String rel = ci.name.substr(prefix.size());
-				if (rel.empty()) continue;
-				if (rel.find(DIR_SEP) != String::npos) continue; // skip non-direct children
+		for (size_t i : app->PopupItems(prefix)) {
+			if (i == App::kAutoSepIndex) {
+				int yy = y + L.sepH / 2;
+				HPEN pen = CreatePen(PS_SOLID, 1, sepColor);
+				HPEN oldPen = (HPEN)SelectObject(hdc_, pen);
+				MoveToEx(hdc_, rc.left + L.hPad, yy, nullptr);
+				LineTo(hdc_, rc.right - L.hPad, yy);
+				SelectObject(hdc_, oldPen); DeleteObject(pen);
+				y += L.sepH;
+				continue;
 			}
+			auto& ci = app->cache->items[i];
 
 			if (App::IsSeparatorFile(ci.name)) {
 				int yy = y + L.sepH / 2;
@@ -2511,19 +4016,19 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			HBRUSH hbr = CreateSolidBrush(hot ? selColor : bgColor);
 			FillRect(hdc_, &ir, hbr); DeleteObject(hbr);
 
-			auto& ic = app->icon_cache.get(hwnd, ci.bmp.hBmp);
+			auto& ic = app->icon_cache.get(hwnd, ci.bmp.hBmp, app->IconPxFor(prefix));
 			int ix = ir.left + L.hPad;
 			int iy = ir.top  + (L.itemH - ic.sz.cy) / 2;
 			HDC mem = CreateCompatibleDC(hdc_); HGDIOBJ old = SelectObject(mem, ic.bmp);
 			BLENDFUNCTION bf{}; bf.BlendOp=AC_SRC_OVER; bf.SourceConstantAlpha=255; bf.AlphaFormat=AC_SRC_ALPHA;
-			AlphaBlend(hdc_, ix, iy, ic.sz.cx, ic.sz.cy, mem, 0,0, ic.sz.cx, ic.sz.cy, bf);
+			AlphaBlend(hdc_, ix, iy, ic.sz.cx, ic.sz.cy, mem, 0,0, ic.srcSz.cx, ic.srcSz.cy, bf);
 			SelectObject(mem, old); DeleteDC(mem);
 
 			// Strip sort-prefix (%NN%), suffix and extensions for display
 			String disp = isRoot ? ci.name : ci.name.substr(prefix.size());
 			disp = Util::StripSortPrefix(disp);
-			if (Util::ends_with(disp, SUBMENU_SUFFIX))
-				disp = Util::rtrim(disp, SUBMENU_SUFFIX);
+			if (ci.is_submenu)
+				disp = Util::StripSubmenuSuffix(disp);
 			else
 				for (auto& ext : { L".lnk", L".bat", L".cmd", L".exe", L".vbs", L".url" })
 					if (Util::ends_with(disp, ext)) { disp = Util::rtrim(disp, ext); break; }
@@ -2580,7 +4085,7 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		const String& prefix = state->prefix;
 		bool isRoot = prefix.empty();
 
-		PopupLayout L = MakeLayout(hwnd);
+		PopupLayout L = MakeLayout(hwnd, app->IconPxFor(prefix));
 		RECT rc; GetClientRect(hwnd, &rc);
 		POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
 
@@ -2597,16 +4102,9 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		}
 
 		if (newHot == -1) {
-			for (size_t i = (isRoot ? 1 : 0); i < app->cache->items.size(); ++i) {
+			for (size_t i : app->PopupItems(prefix)) {
+				if (i == App::kAutoSepIndex) { y += L.sepH; continue; }
 				auto& it = app->cache->items[i];
-				if (isRoot) {
-					if (it.name.find(DIR_SEP) != String::npos) continue;
-				} else {
-					if (it.name.rfind(prefix, 0) != 0) continue;
-					String rel = it.name.substr(prefix.size());
-					if (rel.empty()) continue;
-					if (rel.find(DIR_SEP) != String::npos) continue; // skip non-direct children
-				}
 				bool isSep = App::IsSeparatorFile(it.name);
 				int h = isSep ? L.sepH : L.itemH;
 				RECT r = { rc.left, y, rc.right, y + h };
@@ -2643,41 +4141,76 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			state->hotSubIdx = newHotSubIdx;
 
 			if (newHotSubIdx != -1) {
-				// Open new child hover-popup without stealing focus
 				RECT wr; GetWindowRect(hwnd, &wr);
 				POINT mid = { 0, y + L.itemH / 2 }; // y was left at the matching row top
 				ClientToScreen(hwnd, &mid);
 				int sx = wr.right;
 				int sy = mid.y;
 
-				auto sz = app->MeasureMenuSize(newSubPrefix);
-				HMONITOR hMon = MonitorFromPoint({ sx, sy }, MONITOR_DEFAULTTONEAREST);
-				MONITORINFO mi2{ sizeof(mi2) };
-				GetMonitorInfo(hMon, &mi2);
-				RECT& wa = mi2.rcWork;
-				int cx = sx, cy = sy - sz.h / 2;
-				if (cx + sz.w > wa.right)  cx = wr.left - sz.w;
-				if (cy + sz.h > wa.bottom) cy = wa.bottom - sz.h;
-				if (cy < wa.top)           cy = wa.top;
+				if (app->single_submenu_mode) {
+					// Open a flat, non-recursive icon grid instead of a nested popup.
+					auto gm = app->MeasureGridSize(newSubPrefix);
+					if (gm.totalW > 0 && gm.totalH > 0) {
+						HMONITOR hMon = MonitorFromPoint({ sx, sy }, MONITOR_DEFAULTTONEAREST);
+						MONITORINFO mi2{ sizeof(mi2) };
+						GetMonitorInfo(hMon, &mi2);
+						RECT& wa = mi2.rcWork;
+						int cx = sx, cy = sy - gm.totalH / 2;
+						if (cx + gm.totalW > wa.right)  cx = wr.left - gm.totalW;
+						if (cy + gm.totalH > wa.bottom) cy = wa.bottom - gm.totalH;
+						if (cy < wa.top)                cy = wa.top;
 
-				auto* childState = new PopupState{ app, newSubPrefix };
-				childState->parentHwnd = hwnd;
+						auto* cp = new App::GridCreateParams{ app, newSubPrefix, hwnd, 0 };
+						HWND child = CreateWindowEx(
+							WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+							STACKY_GRID_CLASS, L"",
+							WS_POPUP | WS_BORDER,
+							cx, cy, gm.totalW, gm.totalH,
+							nullptr, nullptr, GetModuleHandle(nullptr), cp);
 
-				HWND child = CreateWindowEx(
-					WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-					STACKY_POPUP_CLASS, L"",
-					WS_POPUP | WS_BORDER,
-					cx, cy, sz.w, sz.h,
-					nullptr, nullptr, GetModuleHandle(nullptr), childState);
-
-				if (child) {
-					Util::SetWindowRoundedCorners(child);
-					ShowWindow(child, SW_SHOWNOACTIVATE);
-					UpdateWindow(child);
-					state->childHwnd = child;
+						if (child) {
+							Util::SetWindowRoundedCorners(child);
+							ShowWindow(child, SW_SHOWNOACTIVATE);
+							UpdateWindow(child);
+							state->childHwnd = child;
+						} else {
+							delete cp;
+							state->hotSubIdx = -1;
+						}
+					} else {
+						state->hotSubIdx = -1;
+					}
 				} else {
-					delete childState;
-					state->hotSubIdx = -1;
+					// Open new child hover-popup without stealing focus
+					auto sz = app->MeasureMenuSize(newSubPrefix);
+					HMONITOR hMon = MonitorFromPoint({ sx, sy }, MONITOR_DEFAULTTONEAREST);
+					MONITORINFO mi2{ sizeof(mi2) };
+					GetMonitorInfo(hMon, &mi2);
+					RECT& wa = mi2.rcWork;
+					int cx = sx, cy = sy - sz.h / 2;
+					if (cx + sz.w > wa.right)  cx = wr.left - sz.w;
+					if (cy + sz.h > wa.bottom) cy = wa.bottom - sz.h;
+					if (cy < wa.top)           cy = wa.top;
+
+					auto* childState = new PopupState{ app, newSubPrefix };
+					childState->parentHwnd = hwnd;
+
+					HWND child = CreateWindowEx(
+						WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+						STACKY_POPUP_CLASS, L"",
+						WS_POPUP | WS_BORDER,
+						cx, cy, sz.w, sz.h,
+						nullptr, nullptr, GetModuleHandle(nullptr), childState);
+
+					if (child) {
+						Util::SetWindowRoundedCorners(child);
+						ShowWindow(child, SW_SHOWNOACTIVATE);
+						UpdateWindow(child);
+						state->childHwnd = child;
+					} else {
+						delete childState;
+						state->hotSubIdx = -1;
+					}
 				}
 			}
 		}
@@ -2721,7 +4254,7 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 						state->childHwnd = nullptr;
 						state->hotSubIdx  = -1;
 					}
-					// else: cursor entered child – keep it alive
+					// else: cursor entered child ï¿½ keep it alive
 				}
 			}
 		}
@@ -2734,7 +4267,7 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		if (app) {
 			const String& prefix = state->prefix;
 			bool isRoot = prefix.empty();
-			PopupLayout L = MakeLayout(hwnd);
+			PopupLayout L = MakeLayout(hwnd, app->IconPxFor(prefix));
 			RECT rc; GetClientRect(hwnd, &rc);
 			POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
 			int y = rc.top + L.vPad;
@@ -2750,16 +4283,9 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				y += L.itemH + L.sepH;
 			}
 
-			for (size_t i = (isRoot ? 1 : 0); i < app->cache->items.size(); ++i) {
+			for (size_t i : app->PopupItems(prefix)) {
+				if (i == App::kAutoSepIndex) { y += L.sepH; continue; }
 				auto& it = app->cache->items[i];
-				if (isRoot) {
-					if (it.name.find(DIR_SEP) != String::npos) continue;
-				} else {
-					if (it.name.rfind(prefix, 0) != 0) continue;
-					String rel = it.name.substr(prefix.size());
-					if (rel.empty()) continue;
-					if (rel.find(DIR_SEP) != String::npos) continue; // skip non-direct children
-				}
 				bool isSep = App::IsSeparatorFile(it.name);
 				int h = isSep ? L.sepH : L.itemH;
 				RECT r = { rc.left, y, rc.right, y + h };
@@ -2771,10 +4297,11 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 						} else {
 							String cmd = app->cache->path(it.name);
 							ShellExecute(nullptr, nullptr, cmd.c_str(), nullptr, nullptr, SW_NORMAL);
+							Util::RegisterRecentLaunch(cmd);
 							{
 								String web_url = Util::GetWebUrl(cmd);
 								if (!web_url.empty() && !Util::HasCustomIcon(cmd))
-									Util::TriggerFaviconDownloadAsync(app->cache->base_dir, it.name, web_url, app->cache->cache_path);
+									Util::TriggerFaviconDownloadAsync(app->cache->base_dir, it.name, web_url, app->cache->cache_path, cmd);
 							}
 							PostMessage(hwnd, WM_CLOSE, 0, 0);
 						}
@@ -2785,6 +4312,43 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			}
 		}
 		PostMessage(hwnd, WM_CLOSE, 0, 0);
+		return 0;
+	}
+
+	case WM_RBUTTONDOWN: {
+		auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+		App* app = state ? state->app : nullptr;
+		if (app) {
+			const String& prefix = state->prefix;
+			bool isRoot = prefix.empty();
+			PopupLayout L = MakeLayout(hwnd, app->IconPxFor(prefix));
+			RECT rc; GetClientRect(hwnd, &rc);
+			POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+			int y = rc.top + L.vPad;
+
+			if (isRoot && !app->hide_header && app->cache->items.size() >= 1) {
+				y += L.itemH + L.sepH;
+			}
+
+			for (size_t i : app->PopupItems(prefix)) {
+				if (i == App::kAutoSepIndex) { y += L.sepH; continue; }
+				auto& it = app->cache->items[i];
+				bool isSep = App::IsSeparatorFile(it.name);
+				int h = isSep ? L.sepH : L.itemH;
+				RECT r = { rc.left, y, rc.right, y + h };
+				if (PtInRect(&r, pt)) {
+					if (!isSep && it.is_submenu) {
+						String submenu_path = it.submenu_path.empty() ? app->cache->path(it.name) : it.submenu_path;
+						app->ShowSubfolderContextMenu(hwnd, submenu_path);
+					} else if (!isSep) {
+						String shortcut_path = app->cache->path(it.name);
+						app->ShowShortcutContextMenu(hwnd, shortcut_path);
+					}
+					return 0;
+				}
+				y += h;
+			}
+		}
 		return 0;
 	}
 
@@ -2800,8 +4364,10 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_KILLFOCUS: {
 		auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 		HWND newFocus = (HWND)wParam;
-		// Don't close if focus moved to our hover-child
-		bool focusToChild = state && state->childHwnd && (newFocus == state->childHwnd);
+		// Don't close if focus moved to our hover-child, or to any deeper
+		// descendant (2nd level or beyond) of it, e.g. after a right-click
+		// context menu was shown from a nested submenu.
+		bool focusToChild = state && state->childHwnd && IsDescendantMenuWindow(state->childHwnd, newFocus);
 		// Don't close if we ARE a hover-child (parent controls our lifetime)
 		bool isHoverChild = state && (state->parentHwnd != nullptr);
 		if (!focusToChild && !isHoverChild)
@@ -2833,7 +4399,9 @@ struct GridState {
     HWND      parentHwnd;   // nullptr for root grid
     GridMode  grid_mode;
     // geometry
-    int       cellSz;
+    int       cellSz;       // icon-area square side
+    int       cellW;        // actual column step (== cellSz except SS_NAME_RIGHT/SS_NAME_BELOW)
+    int       cellPad;      // side padding used by SS_NAME_BELOW (24px) for name-extend math
     int       cellH;        // cellSz + labelH
     int       labelH;
     int       cols;
@@ -2843,6 +4411,7 @@ struct GridState {
                             // subTwoCol mode: number of items in the submenu column.
     int       topPad;       // GRID_F2 only: space reserved above row 0 for upward triangle
     bool      subTwoCol;    // GRID_CASCADE/GRID_CASCADE_NAME submenus only: 2-column layout
+    int       iconPx;       // logical icon size (20 for mini, 32 normal), before DPI scaling
     // hover
     int       hotCell;
     bool      trackingMouse;
@@ -2862,21 +4431,82 @@ struct TipData {
 };
 static TipData g_tipData;
 
+// Returns true if `candidate` is `ancestor` itself, or is reachable from
+// `ancestor` by following the chain of hover-opened children (childHwnd for
+// popups, subChild for grids), at ANY nesting depth. Used by WM_KILLFOCUS so
+// that a popup/grid does not incorrectly close itself when focus moves to a
+// deeply nested descendant (2nd level or deeper) instead of its direct child
+// (e.g. right-click context menus opened from nested submenus, which call
+// SetForegroundWindow on that nested window rather than the direct child).
+bool IsDescendantMenuWindow(HWND ancestor, HWND candidate) {
+    if (!ancestor || !candidate) return false;
+    if (ancestor == candidate) return true;
+
+    HWND cur = ancestor;
+    while (cur && IsWindow(cur)) {
+        wchar_t cls[64] = { 0 };
+        GetClassName(cur, cls, _countof(cls));
+        HWND next = nullptr;
+        if (wcscmp(cls, STACKY_POPUP_CLASS) == 0) {
+            auto* s = (PopupState*)GetWindowLongPtr(cur, GWLP_USERDATA);
+            if (s) next = s->childHwnd;
+        } else if (wcscmp(cls, STACKY_GRID_CLASS) == 0) {
+            auto* s = (GridState*)GetWindowLongPtr(cur, GWLP_USERDATA);
+            if (s) next = s->subChild;
+        }
+        if (!next || !IsWindow(next)) return false;
+        if (next == candidate) return true;
+        cur = next;
+    }
+    return false;
+}
+
+// Walk up the popup/grid parent chain from `owner` (which may itself be a
+// hover-opened child popup or nested submenu grid) to find the root menu
+// window, then restore keyboard focus and foreground status to it. This is
+// needed after closing an app-owned right-click context menu (TrackPopupMenuEx),
+// which otherwise leaves focus nowhere useful, so WM_KILLFOCUS never fires
+// again and the whole menu/submenu chain stays stuck open.
+void RestoreFocusToRootMenuWindow(HWND owner) {
+    if (!owner || !IsWindow(owner)) return;
+
+    HWND root = owner;
+    while (true) {
+        wchar_t cls[64] = { 0 };
+        GetClassName(root, cls, _countof(cls));
+        HWND parent = nullptr;
+        if (wcscmp(cls, STACKY_POPUP_CLASS) == 0) {
+            auto* s = (PopupState*)GetWindowLongPtr(root, GWLP_USERDATA);
+            if (s) parent = s->parentHwnd;
+        } else if (wcscmp(cls, STACKY_GRID_CLASS) == 0) {
+            auto* s = (GridState*)GetWindowLongPtr(root, GWLP_USERDATA);
+            if (s) parent = s->parentHwnd;
+        }
+        if (!parent || !IsWindow(parent)) break;
+        root = parent;
+    }
+
+    if (IsWindow(root)) {
+        SetForegroundWindow(root);
+        SetFocus(root);
+    }
+}
+
 // Timer IDs for the grid window
 static const UINT_PTR GRID_TIMER_SHOW      = 1;  // delay before showing tooltip
 static const UINT_PTR GRID_TIMER_HIDE      = 2;  // auto-hide tooltip
 static const UINT_PTR GRID_TIMER_SUBCL     = 3;  // grace period before closing sub-grid
 
-// Helper: build display name from a cache item name + prefix
+	// Helper: build display name from a cache item name + prefix.
+	// Strips .submenu / .submenu-mini and layout tokens so the shown label
+	// is the clean folder/file name.
 static String GridDisplayName(const String& name, const String& prefix) {
-    String s = name.substr(prefix.size());
-    s = Util::StripSortPrefix(s);
-    // strip known extensions
-    for (auto& ext : { L".lnk", L".bat", L".cmd", L".exe", L".vbs", L".url" })
-        if (Util::ends_with(s, ext)) { s = Util::rtrim(s, ext); break; }
-    // strip .submenu suffix
-    if (Util::ends_with(s, SUBMENU_SUFFIX)) s = Util::rtrim(s, SUBMENU_SUFFIX);
-    return s;
+	String s = name.substr(prefix.size());
+	s = Util::StripSortPrefix(s);
+	for (auto& ext : { L".lnk", L".bat", L".cmd", L".exe", L".vbs", L".url" })
+		if (Util::ends_with(s, ext)) { s = Util::rtrim(s, ext); break; }
+	s = Util::StripSubmenuSuffix(s);
+	return s;
 }
 
 // Helper: compute (col,row) for a given item index according to grid layout.
@@ -2937,7 +4567,7 @@ static void GridShowTip(HWND hwnd, GridState* gs, int cellIdx) {
     int col, row;
     GridCellPos(gs, cellIdx, col, row);
     POINT origin = {0,0}; ClientToScreen(hwnd, &origin);
-    int tipX = origin.x + col * gs->cellSz + gs->cellSz/2 - tipW/2;
+    int tipX = origin.x + col * gs->cellW + gs->cellW/2 - tipW/2;
     int tipY = origin.y + gs->topPad + row * gs->cellH - tipH - 2;
     // if above screen, place below icon
     if (tipY < 0) tipY = origin.y + gs->topPad + row * gs->cellH + gs->cellSz + 2;
@@ -3151,16 +4781,22 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         auto* cs = (CREATESTRUCT*)lParam;
         auto* cp = (App::GridCreateParams*)cs->lpCreateParams;
         auto  gm  = cp->app->MeasureGridSize(cp->prefix);
+        GridMode effMode = cp->app->EffectiveGridMode(cp->prefix);
         // For GRID_CASCADE/GRID_CASCADE_NAME sub-grids use gm.cols whenever it computed
         // a multi-column layout (subTwoCol, or an all-plain-items submenu now laid out
-        // as 2 columns); otherwise force 1 column. GRID_F2 sub-grids always use gm.cols.
-        int cols = (cp->prefix.empty() || cp->app->grid_mode == GRID_F2 || cp->app->grid_mode == GRID_F2_NAME || gm.cols > 1) ? gm.cols : 1;
+        // as 2 columns); otherwise force 1 column. GRID_F2 and GRID_SS_* sub-grids always use gm.cols.
+        int cols = (cp->prefix.empty() || effMode == GRID_F2 || effMode == GRID_F2_NAME ||
+                    effMode == GRID_SS_ICON || effMode == GRID_SS_NAME_RIGHT || effMode == GRID_SS_NAME_BELOW ||
+                    effMode == GRID_NAME_RIGHT ||
+                    gm.cols > 1) ? gm.cols : 1;
         auto* gs  = new GridState{};
         gs->app           = cp->app;
         gs->prefix        = cp->prefix;
         gs->parentHwnd    = cp->parentHwnd;
-        gs->grid_mode     = cp->app->grid_mode;
+        gs->grid_mode     = effMode;
         gs->cellSz        = gm.cellSz;
+        gs->cellW         = gm.cellW;
+        gs->cellPad       = gm.cellPad;
         gs->cellH         = gm.cellH;
         gs->labelH        = gm.labelH;
         gs->cols          = cols;
@@ -3168,6 +4804,7 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         gs->f2Row1Count   = gm.f2Row1Count;
         gs->topPad        = gm.topPad;
         gs->subTwoCol     = gm.subTwoCol;
+        gs->iconPx        = cp->app->IconPxFor(cp->prefix);
         gs->hotCell       = -1;
         gs->tipHwnd       = nullptr;
         gs->trackingMouse = false;
@@ -3180,6 +4817,19 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         delete cp;
         return 0;
     }
+    case WM_SETTINGCHANGE:
+    case WM_DWMCOLORIZATIONCOLORCHANGED: {
+        // System color mode/accent changed: refresh the cache and repaint if
+        // this grid is following the system theme (event-driven, no polling).
+        auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        if (gs && gs->app && gs->app->theme_mode == THEME_SYSTEM) {
+            RefreshSystemThemeCache();
+            gs->app->dark_mode = GetSystemTheme().dark;
+            gs->dark_mode      = gs->app->dark_mode;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+        break;
+    }
     case WM_DESTROY: {
         auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
         if (gs) {
@@ -3188,24 +4838,31 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             KillTimer(hwnd, GRID_TIMER_SUBCL);
             if (gs->tipHwnd && IsWindow(gs->tipHwnd)) DestroyWindow(gs->tipHwnd);
             if (gs->subChild && IsWindow(gs->subChild)) DestroyWindow(gs->subChild);
-            // notify parent
+            // notify parent (may be a grid window or, in --singlesubmenu mode, a popup window)
             if (gs->parentHwnd && IsWindow(gs->parentHwnd)) {
-                auto* ps = (GridState*)GetWindowLongPtr(gs->parentHwnd, GWLP_USERDATA);
-                if (ps && ps->subChild == hwnd) {
-                    ps->subChild   = nullptr;
-                    ps->hotSubCell = -1;
+                wchar_t parentClass[64] = { 0 };
+                GetClassName(gs->parentHwnd, parentClass, _countof(parentClass));
+                if (wcscmp(parentClass, STACKY_GRID_CLASS) == 0) {
+                    auto* ps = (GridState*)GetWindowLongPtr(gs->parentHwnd, GWLP_USERDATA);
+                    if (ps && ps->subChild == hwnd) {
+                        ps->subChild   = nullptr;
+                        ps->hotSubCell = -1;
+                    }
+                } else if (wcscmp(parentClass, STACKY_POPUP_CLASS) == 0) {
+                    auto* ps = (PopupState*)GetWindowLongPtr(gs->parentHwnd, GWLP_USERDATA);
+                    if (ps && ps->childHwnd == hwnd) {
+                        ps->childHwnd = nullptr;
+                        ps->hotSubIdx = -1;
+                    }
                 }
             }
+            HWND parent = gs->parentHwnd;
             delete gs;
             SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
+            // Root icon-grid only. A --singlesubmenu hover grid is a child of
+            // the list popup; quitting here would tear down the whole menu.
+            if (!parent) PostQuitMessage(0);
         }
-        // only post quit for root grid (no parent)
-        {
-            auto* gs2 = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
-            // gs2 is now null (we deleted it), check parentHwnd via local copy
-        }
-        // We always post quit; sub-grids are destroyed by their parent before root quits
-        PostQuitMessage(0);
         return 0;
     }
     case WM_ERASEBKGND:
@@ -3223,20 +4880,19 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         HGDIOBJ oldBmp = SelectObject(memDC, memBmp);
 
         bool dm = gs->dark_mode;
-        COLORREF gridBg  = dm ? RGB(32,32,32)  : RGB(240,240,240);
-        COLORREF gridHov = dm ? RGB(64,64,64)  : RGB(204,228,247);
+        COLORREF gridBg  = gs->app ? gs->app->BackgroundColor() : (dm ? RGB(32,32,32) : RGB(240,240,240));
+        COLORREF gridHov = gs->app ? gs->app->SelectionColor() : (dm ? RGB(64,64,64) : RGB(204,228,247));
         COLORREF labelFg = dm ? RGB(220,220,220): RGB(30,30,30);
+        COLORREF labelFgSel = gs->app ? gs->app->SelectionTextColor() : (dm ? RGB(255,255,255) : GetSysColor(COLOR_HIGHLIGHTTEXT));
         HBRUSH bgBr = CreateSolidBrush(gridBg);
         FillRect(memDC, &rc, bgBr); DeleteObject(bgBr);
 
         auto items = gs->app->GridItems(gs->prefix);
         int  sz    = gs->cellSz;
+        int  cW    = gs->cellW;
         int  cH    = gs->cellH;
-        int  pad   = gs->cellSz - MulDiv(32, GetDpiForWindow(hwnd), 96); // = cellPad*2 approx
-        int  iconSz= sz - pad;  // = iconSz approx
-        // more precise: derive from cellSz
         UINT dpi   = GetDpiForWindow(hwnd);
-        int  iSz   = MulDiv(32, dpi, 96);
+        int  iSz   = MulDiv(gs->iconPx, dpi, 96);
         int  iPad  = MulDiv(8,  dpi, 96);
 
         // Prepare label font (used for GRID_NAME and also submenu arrow)
@@ -3246,15 +4902,24 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             wcscpy_s(lf.lfFaceName, L"Segoe UI");
             labelFnt = CreateFontIndirect(&lf);
         }
+        // Main-menu font, used for GRID_SS_NAME_RIGHT / GRID_SS_NAME_BELOW / GRID_NAME_RIGHT item names
+        // (per spec: same font/size as the main menu).
+        HFONT mainMenuFnt = nullptr;
+        if (gs->grid_mode == GRID_SS_NAME_RIGHT || gs->grid_mode == GRID_SS_NAME_BELOW || gs->grid_mode == GRID_NAME_RIGHT) {
+            NONCLIENTMETRICS ncm{}; ncm.cbSize = sizeof(ncm);
+            SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+            ncm.lfMenuFont.lfWeight = FW_NORMAL;
+            mainMenuFnt = CreateFontIndirect(&ncm.lfMenuFont);
+        }
 
         for (int i = 0; i < (int)items.size(); ++i) {
             int col, row;
             GridCellPos(gs, i, col, row);
-            int x = col * sz;
+            int x = col * cW;
             int y = gs->topPad + row * cH;
-            RECT cell = { x, y, x + sz, y + sz };
+            RECT cell = { x, y, x + cW, y + cH };
 
-            // hover highlight (icon area)
+            // hover highlight (whole cell)
             if (i == gs->hotCell) {
                 HBRUSH hlBr = CreateSolidBrush(gridHov);
                 FillRect(memDC, &cell, hlBr); DeleteObject(hlBr);
@@ -3262,21 +4927,30 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
             // draw icon
             auto& ci = gs->app->cache->items[items[i]];
-            auto& ic = gs->app->icon_cache.get(hwnd, ci.bmp.hBmp);
+            auto& ic = gs->app->icon_cache.get(hwnd, ci.bmp.hBmp, gs->iconPx);
             HDC tmpDC = CreateCompatibleDC(memDC);
             HGDIOBJ oldTmp = SelectObject(tmpDC, ic.bmp);
             BLENDFUNCTION bf{}; bf.BlendOp = AC_SRC_OVER; bf.SourceConstantAlpha = 255; bf.AlphaFormat = AC_SRC_ALPHA;
-            int drawSz = min(iSz, (int)min(ic.sz.cx, ic.sz.cy));
-            int ox = x + iPad + (iSz - drawSz) / 2;
-            int oy = y + iPad + (iSz - drawSz) / 2;
-            AlphaBlend(memDC, ox, oy, drawSz, drawSz, tmpDC, 0, 0, ic.sz.cx, ic.sz.cy, bf);
+            int drawSz = iSz;
+            int iconX, iconY;
+            if (gs->grid_mode == GRID_SS_NAME_RIGHT || gs->grid_mode == GRID_NAME_RIGHT) {
+                iconX = x + iPad + (iSz - drawSz) / 2;
+                iconY = y + (cH - iSz) / 2;
+            } else if (gs->grid_mode == GRID_SS_NAME_BELOW) {
+                iconX = x + (cW - iSz) / 2;
+                iconY = y + (sz - iSz) + (iSz - drawSz) / 2;
+            } else {
+                iconX = x + iPad + (iSz - drawSz) / 2;
+                iconY = y + iPad + (iSz - drawSz) / 2;
+            }
+            AlphaBlend(memDC, iconX, iconY, drawSz, drawSz, tmpDC, 0, 0, ic.srcSz.cx, ic.srcSz.cy, bf);
             SelectObject(tmpDC, oldTmp); DeleteDC(tmpDC);
 
             // draw label below icon (GRID_NAME / GRID_CASCADE_NAME / GRID_F2_NAME modes)
             if ((gs->grid_mode == GRID_NAME || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2_NAME) && gs->labelH > 0 && labelFnt) {
                 String disp = GridDisplayName(ci.name, gs->prefix);
                 HFONT oldF = (HFONT)SelectObject(memDC, labelFnt);
-                SetTextColor(memDC, labelFg);
+                SetTextColor(memDC, (i == gs->hotCell) ? labelFgSel : labelFg);
                 SetBkMode(memDC, TRANSPARENT);
                 // Measure width of 'a' as lateral margin
                 SIZE aSz{}; GetTextExtentPoint32(memDC, L"a", 1, &aSz);
@@ -3297,6 +4971,53 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                 SelectObject(memDC, oldF);
             }
+
+            // draw name to the right of the icon (GRID_SS_NAME_RIGHT / GRID_NAME_RIGHT variants)
+            if ((gs->grid_mode == GRID_SS_NAME_RIGHT || gs->grid_mode == GRID_NAME_RIGHT) && mainMenuFnt) {
+                String disp = GridDisplayName(ci.name, gs->prefix);
+                HFONT oldF = (HFONT)SelectObject(memDC, mainMenuFnt);
+                SetTextColor(memDC, (i == gs->hotCell) ? labelFgSel : labelFg);
+                SetBkMode(memDC, TRANSPARENT);
+                int textGap = 0;
+                RECT lr = { x + sz + textGap, y, x + cW, y + cH };
+                int availW = lr.right - lr.left;
+                String truncated = disp;
+                SIZE ts2{};
+                GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                while (!truncated.empty() && ts2.cx > availW) {
+                    truncated.pop_back();
+                    GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                }
+                DrawText(memDC, truncated.c_str(), -1, &lr,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                SelectObject(memDC, oldF);
+            }
+
+            // draw name below the icon (--singlesubmenu GRID_SS_NAME_BELOW variant):
+            // single centered line, allowed to extend up to 16px into the empty
+            // space between icons on either side, truncated (no ellipsis) if still too long.
+            if (gs->grid_mode == GRID_SS_NAME_BELOW && gs->labelH > 0 && mainMenuFnt) {
+                String disp = GridDisplayName(ci.name, gs->prefix);
+                HFONT oldF = (HFONT)SelectObject(memDC, mainMenuFnt);
+                SetTextColor(memDC, (i == gs->hotCell) ? labelFgSel : labelFg);
+                SetBkMode(memDC, TRANSPARENT);
+                int extend = MulDiv(16, dpi, 96);
+                RECT lr = { x + gs->cellPad - extend, y + sz, x + cW - gs->cellPad + extend, y + cH };
+                if (lr.left < x) lr.left = x;
+                if (lr.right > x + cW) lr.right = x + cW;
+                int availW = lr.right - lr.left;
+                String truncated = disp;
+                SIZE ts2{};
+                GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                while (!truncated.empty() && ts2.cx > availW) {
+                    truncated.pop_back();
+                    GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                }
+                RECT dr = lr;
+                DrawText(memDC, truncated.c_str(), -1, &dr, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX | DT_VCENTER);
+                SelectObject(memDC, oldF);
+            }
+
 
             // draw small submenu indicator for GRID_CASCADE / GRID_CASCADE_NAME submenu items
             if ((gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME) && ci.is_submenu) {
@@ -3359,6 +5080,7 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
         }
         if (labelFnt) DeleteObject(labelFnt);
+        if (mainMenuFnt) DeleteObject(mainMenuFnt);
         BitBlt(dc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
         SelectObject(memDC, oldBmp); DeleteObject(memBmp); DeleteDC(memDC);
         EndPaint(hwnd, &ps);
@@ -3380,8 +5102,8 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         for (int i = 0; i < (int)items.size(); ++i) {
             int col, row;
             GridCellPos(gs, i, col, row);
-            RECT cell = { col*gs->cellSz, gs->topPad + row*gs->cellH,
-                          col*gs->cellSz + gs->cellSz, gs->topPad + row*gs->cellH + gs->cellSz };
+            RECT cell = { col*gs->cellW, gs->topPad + row*gs->cellH,
+                          col*gs->cellW + gs->cellW, gs->topPad + row*gs->cellH + gs->cellH };
             if (PtInRect(&cell, pt)) { newHot = i; break; }
         }
 
@@ -3498,8 +5220,8 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         for (int i = 0; i < (int)items.size(); ++i) {
             int col, row;
             GridCellPos(gs, i, col, row);
-            RECT cell = { col*gs->cellSz, gs->topPad + row*gs->cellH,
-                          col*gs->cellSz + gs->cellSz, gs->topPad + row*gs->cellH + gs->cellSz };
+            RECT cell = { col*gs->cellW, gs->topPad + row*gs->cellH,
+                          col*gs->cellW + gs->cellW, gs->topPad + row*gs->cellH + gs->cellH };
             if (PtInRect(&cell, pt)) {
                 auto& ci = gs->app->cache->items[items[i]];
                 if (ci.is_submenu && (gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME)) {
@@ -3514,10 +5236,11 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 } else {
                     String cmd = gs->app->cache->path(ci.name);
                     ShellExecute(nullptr, nullptr, cmd.c_str(), nullptr, nullptr, SW_NORMAL);
+                    Util::RegisterRecentLaunch(cmd);
                     {
                         String web_url = Util::GetWebUrl(cmd);
                         if (!web_url.empty() && !Util::HasCustomIcon(cmd))
-                            Util::TriggerFaviconDownloadAsync(gs->app->cache->base_dir, ci.name, web_url, gs->app->cache->cache_path);
+                            Util::TriggerFaviconDownloadAsync(gs->app->cache->base_dir, ci.name, web_url, gs->app->cache->cache_path, cmd);
                     }
                     // Close entire grid hierarchy
                     HWND root = hwnd;
@@ -3535,13 +5258,40 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         PostMessage(hwnd, WM_CLOSE, 0, 0);
         return 0;
     }
+    case WM_RBUTTONDOWN: {
+        auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        if (!gs) break;
+        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        auto items = gs->app->GridItems(gs->prefix);
+        for (int i = 0; i < (int)items.size(); ++i) {
+            int col, row;
+            GridCellPos(gs, i, col, row);
+            RECT cell = { col*gs->cellW, gs->topPad + row*gs->cellH,
+                          col*gs->cellW + gs->cellW, gs->topPad + row*gs->cellH + gs->cellH };
+            if (PtInRect(&cell, pt)) {
+                auto& ci = gs->app->cache->items[items[i]];
+                if (ci.is_submenu) {
+                    String submenu_path = ci.submenu_path.empty() ? gs->app->cache->path(ci.name) : ci.submenu_path;
+                    gs->app->ShowSubfolderContextMenu(hwnd, submenu_path);
+                } else {
+                    String shortcut_path = gs->app->cache->path(ci.name);
+                    gs->app->ShowShortcutContextMenu(hwnd, shortcut_path);
+                }
+                return 0;
+            }
+        }
+        return 0;
+    }
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE) PostMessage(hwnd, WM_CLOSE, 0, 0);
         return 0;
     case WM_KILLFOCUS: {
         auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
         HWND nf = (HWND)wParam;
-        bool toChild = gs && gs->subChild && (nf == gs->subChild);
+        // Don't close if focus moved to our sub-grid, or to any deeper
+        // descendant (2nd level or beyond) of it, e.g. after a right-click
+        // context menu was shown from a nested submenu.
+        bool toChild = gs && gs->subChild && IsDescendantMenuWindow(gs->subChild, nf);
         bool isChild = gs && gs->parentHwnd != nullptr;
         if (!toChild && !isChild)
             PostMessage(hwnd, WM_CLOSE, 0, 0);
@@ -3568,6 +5318,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPTSTR cmd_line, int) {
 
 	String  stack_path, opts;
 	int     cmd_line_error = Util::parse_cmd_line(cmd_line, stack_path, opts);
+
+	// No arguments at all (plain double-click on stacky-plus.exe): open the
+	// advanced Configuration window instead of showing the "parameter
+	// missing" error message.
+	if (cmd_line_error == ERR_PATH_MISSING && String(cmd_line).empty()) {
+		return RunStackyConfigWindow(inst);
+	}
+
 	String  err_title = String(L"Stacky v") + STACKY_VERSION_STR + L": ";
 	String  err_msg = L"Path: " + stack_path;
 
@@ -3583,7 +5341,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPTSTR cmd_line, int) {
 			L"  --hide-shortcuts-folder  Hide the shortcuts folder item (base folder) and separator\n"
 			L"  --hide-header            (deprecated: use --hide-shortcuts-folder)\n"
 			L"  --compact-header         Show only folder name in the header\n"
-			L"  --dark-mode              Use dark-mode for the menu"
+			L"  --dark-mode              Use dark-mode for the menu\n"
+			L"  --light-mode             Use light-mode for the menu\n"
+			L"                           (default: follow the system color mode/accent)"
 		);
 	}
 	else if (cmd_line_error == ERR_PATH_INVALID) {

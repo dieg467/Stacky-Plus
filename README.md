@@ -26,6 +26,9 @@ The stacky.exe file is 342 kB in size and can be downloaded from https://github.
 ## Why is it so fast?
 Stacky-Plus stores the icons for all shortcuts in a small file within the corresponding folder. When the user opens a menu, Stacky-Plus accesses its cache immediately, without delay, at full speed.
 
+## Advanced Configuration window
+Double-clicking `stacky-plus.exe` directly (i.e. running it with no command-line arguments) opens the "Configuración de Stacky-Plus" window instead of the "parameter missing" message. This window lists every folder placed beside the executable in a tree view; selecting a top-level folder shows menu-wide settings (name, icon, icon size, theme, position, mode, grid columns/names, sort order), while selecting a subfolder shows submenu-specific settings (icon, columns, layout). These settings are saved per folder in a hidden `.stacky-config` file and take priority over folder-name suffixes and command-line options, so folders no longer need to be renamed with magic suffixes to be configured. Subfolders inside a folder configured with a flat grid mode (icon grid, double column, double row) are shown disabled, since that mode does not support nested submenus. The "Crear menú" button creates/updates the `.lnk` shortcut used to launch that menu from the taskbar.
+
 ## STEPS TO FOLLOW
 This application can be downloaded as an .exe file, but it does not need to be installed. There's no need to double-click the .exe file.
 The following steps explain how to create a menu on the taskbar.
@@ -58,6 +61,13 @@ For example, for the "Multimedia" folder you can create the subfolders Music.sub
 Shortcuts located within a folder but outside of subfolders will be displayed in the main menu. <br>
 You can create multiple levels of submenus by creating subfolders (with the .submenu termination) within subfolders.<br>
 *Note:* The "Icon Grid" and "Named Icon Grid" modes do not support submenus.
+
+**MINI SUBMENUS** <br>
+If you want the shortcuts of a submenu (and all of its child submenus) to be displayed with smaller 16px icons instead of the default 32px icons, name the subfolder using the following termination instead of `.submenu`:
+
+`.submenu-mini`
+
+For example, Music.submenu-mini. Only the icon size is reduced; the text size of the shortcuts remains unchanged. This works in all menu modes that support submenus.
 
 **4) CREATING SEPARATORS** <br>
 In the folder or subfolder where you want to create a separator (horizontal dividing line), create a .txt text file, give it a name, and change the .txt extension to the following:
@@ -195,3 +205,36 @@ All menu types support dark mode. For example, if you want the "Multimedia" fold
 - `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2 --dark-mode` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
 
 <img width="713" height="395" alt="16a- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/bcd29b63-0dbe-43f7-bc5b-761d377efbe5" />
+
+## MINI ICON MODE <br>
+If you want a menu (and all of its submenus) to be displayed with smaller 16px icons instead of the default 32px icons, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
+
+`--mini`
+
+All menu types support this option. For example, if you want the "Multimedia" folder to be displayed with mini icons, the Target field should look something like this:
+
+- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --mini` for the default MENU WITH SUBMENU mode
+
+- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-NN --mini` for GRID mode
+
+- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2 --mini` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
+
+Only the icon size is reduced; the text size remains unchanged. `--mini` can be combined with `--dark-mode` and any other option. <br>
+If you only want specific submenus to use mini icons instead of the whole menu, use the `.submenu-mini` folder termination described above instead of `--mini`.
+
+## SINGLE SUBMENU MODE <br>
+This mode keeps the main menu exactly like the default MENU WITH SUBMENU mode, but every submenu becomes a flat icon grid: no submenu can contain child submenus. To enable it, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
+
+`--singlesubmenu`
+
+For example:
+
+- `"C:\STACKY PLUS\stacky-plus.exe" "C:\STACKY PLUS\Multimedia" --singlesubmenu`
+
+Do **not** use the `.submenu` termination in this mode. Each subfolder chooses one of three grid layout variants by its name ending (`NN` is the number of columns):
+
+- **Variant 1 (icon grid):** `.icononly-NN`. Example: `Music.icononly-4`.
+- **Variant 2 (name to the right):** `.NN-name-right`. The submenu has `NN` columns; the shortcut name is shown to the right of the icon, using the same font/size as the main menu. All columns share the same width (max 200px). If a name exceeds the max width it is truncated without ellipsis; if no name exceeds it, the column width shrinks to the longest name. Example: `Music.2-name-right`.
+- **Variant 3 (name below):** `.NN-name-below`. The submenu has `NN` columns, with 24px of horizontal padding and 8px of top padding around each icon. The shortcut name is shown directly below the icon (no gap), centered, spanning 1 or 2 lines, and may extend up to 16px into the empty space between icons. Long names are truncated without ellipsis. Example: `Music.3-name-below`.
+
+If a subfolder does not include any of these suffixes, it is not treated as a singlesubmenu (plain folders stay regular items). Use one of the three endings above to create a submenu.
