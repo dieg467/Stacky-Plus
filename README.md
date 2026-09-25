@@ -1,44 +1,59 @@
 # Stacky-Plus, 4 menu modes for the Windows taskbar  
 
-### Original Source <br>
-This project is based on (1) Pawel Turlejski's original project (https://github.com/pawelt/stacky), which is no longer maintained.
-(2) Clau-Bucur's fork (https://github.com/clau-bucur/stacky)
+### Table of contents
+- [Original Source](#original-source)
+- [Description](#description)
+- [How many menus can I create on the taskbar?](#how-many-menus-can-i-create-on-the-taskbar)
+- [Download](#download)
+- [Why is it so fast?](#why-is-it-so-fast)
+- [Steps to follow](#steps-to-follow) 
+- [Shortcuts to Web Pages](#shortcuts-to-web-pages) 
+- [Shortcuts to system files and hidden files](#shortcuts-to-system-files-and-hidden-files) 
+- [Menu modes](#menu-modes) 
+- [Dark Mode](#dark-mode)
+- [Menu Modifications](#menu-modifications)
+-----------------------------------------------
+
+## Original Source<br>
+This project is based on Pawel Turlejski's original project (https://github.com/pawelt/stacky), which is no longer maintained, and
+Clau-Bucur's fork (https://github.com/clau-bucur/stacky)
 
 ## Description 
-This fork expands Stacky with menu modes. All the changes in this fork were made using Artificial Intelligence and Visual Studio.
-There are 4 possible menu modes, all from the same .exe file:
-- MENU WITH SUBMENUS (default)
-- ICON GRID
-- ICON GRID WITH NAMES
-- DOUBLE COLUMN OF ICONS WITH ICON SUBMENUS
+There are 4 possible menu modes, all accessible from the same .exe file:
+- **MENU WITH SUBMENUS** (default)
+- **ICON GRID** (no submenu), with and without names
+- **DOUBLE COLUMN OF ICONS WITH ICON SUBMENUS**, with and without names
+- **DOUBLE ROW OF ICONS WITH ICON SUBMENUS**, with and without names
 
 <img width="572" height="486" alt="00a- EscritorioW-Submenú" src="https://github.com/user-attachments/assets/731258f9-303e-44b7-8184-524778f3fd5f" />
-<img width="572" height="264" alt="00b- EscritorioW-Cuadrícula" src="https://github.com/user-attachments/assets/f45b75f5-6405-41d4-bdfc-950579f09dd7" />
-<img width="572" height="239" alt="00c- EscritorioW-Cuadrícula-name" src="https://github.com/user-attachments/assets/8fb9a338-2c9d-45e5-947f-2792c8b279fb" />
-<img width="572" height="341" alt="00d- EscritorioW-2C" src="https://github.com/user-attachments/assets/4b1b0ff6-b1be-4112-8667-6631010b958d" />
+
+<img width="572" height="239" alt="z11c- EscritorioW-Cuadríc-Cuadríc-name" src="https://github.com/user-attachments/assets/b947bf9f-a4ec-4bb1-a8b3-d4e6b5ae08cc" />
+
+<img width="572" height="384" alt="z13- EscritorioW-2C·y·2C·name" src="https://github.com/user-attachments/assets/8b0ac811-385d-4087-97b1-3d07e65d4bf1" />
+
+<img width="572" height="332" alt="z14- EscritorioW-2F·y·2F-name" src="https://github.com/user-attachments/assets/385fe1fc-bf88-479d-acc5-f9bf82442845" />
+
 
 ## **How many menus can I create on the taskbar?**
 As many as you want, and in any of the modes. Each one will have its own dedicated button on the taskbar.
 
 ## Download
-The stacky.exe file is 342 kB in size and can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/Stacky-Plus
+The stacky-plus.exe file is 348 kB in size and can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/v-2.0
+This application downloads as an .exe file, but it does not require installation. You do not need to double-click the .exe file.
 
 ## Why is it so fast?
 Stacky-Plus stores the icons for all shortcuts in a small file within the corresponding folder. When the user opens a menu, Stacky-Plus accesses its cache immediately, without delay, at full speed.
-
-## Advanced Configuration window
-Double-clicking `stacky-plus.exe` directly (i.e. running it with no command-line arguments) opens the "Configuración de Stacky-Plus" window instead of the "parameter missing" message. This window lists every folder placed beside the executable in a tree view; selecting a top-level folder shows menu-wide settings (name, icon, icon size, theme, position, mode, grid columns/names, sort order), while selecting a subfolder shows submenu-specific settings (icon, columns, layout). These settings are saved per folder in a hidden `.stacky-config` file and take priority over folder-name suffixes and command-line options, so folders no longer need to be renamed with magic suffixes to be configured. Subfolders inside a folder configured with a flat grid mode (icon grid, double column, double row) are shown disabled, since that mode does not support nested submenus. The "Crear menú" button creates/updates the `.lnk` shortcut used to launch that menu from the taskbar.
 
 ## STEPS TO FOLLOW
 This application can be downloaded as an .exe file, but it does not need to be installed. There's no need to double-click the .exe file.
 The following steps explain how to create a menu on the taskbar.
 
-**1) CREATING THE CONTAINER FOLDER**. Create a folder anywhere on your computer (on drive C, in My Documents, etc.), and name it STACKY PLUS, for example. Place the stacky.exe file there.
+**1) CREATING THE CONTAINER FOLDER**. Create a folder anywhere on your computer (on drive C, in My Documents, etc.), and name it STACKY PLUS, for example. Place the stacky-plus.exe file there.
 
 **2) CREATING FOLDERS** <br>
 **a)** Inside the STACKY PLUS folder, create a folder to hold shortcuts. For example, you can create a "Multimedia" folder if you're going to place shortcuts related to music, videos, etc., there.
 
-<img width="655" height="333" alt="02- Carpeta Stacky Plus + Multimedia" src="https://github.com/user-attachments/assets/ce7379ec-456e-43aa-92df-63b8824b3416" />
+<img width="655" height="333" alt="03-Crear carpeta Multimedia" src="https://github.com/user-attachments/assets/c797668d-0949-4c08-8649-f516b77cf8cf" />
 
 **b)** In the created folder, place shortcuts to applications, folders, files, websites, etc.
 
@@ -53,14 +68,12 @@ If you want a menu to have submenus, you must create subfolders, as detailed bel
 
 `.submenu`
 
-For example, for the "Multimedia" folder you can create the subfolders Music.submenu, Video.submenu, etc.
+The following image shows two submenu subfolders.
 
 <img width="655" height="392" alt="04-Submenú Multimedia" src="https://github.com/user-attachments/assets/35738909-c330-435c-a629-0cbf477bb6dd" />
 
 **b)** Place shortcuts to files, folders, applications, web pages, etc., in each subfolder. Each subfolder will become a submenu.<br>
-Shortcuts located within a folder but outside of subfolders will be displayed in the main menu. <br>
 You can create multiple levels of submenus by creating subfolders (with the .submenu termination) within subfolders.<br>
-*Note:* The "Icon Grid" and "Named Icon Grid" modes do not support submenus.
 
 **MINI SUBMENUS** <br>
 If you want the shortcuts of a submenu (and all of its child submenus) to be displayed with smaller 16px icons instead of the default 32px icons, name the subfolder using the following termination instead of `.submenu`:
@@ -79,12 +92,12 @@ For example, it could be named aa.separator, Multimedia.separator, zz.separator,
 <img width="655" height="423" alt="05- Separador" src="https://github.com/user-attachments/assets/e974381a-d901-47fa-8395-d6e05fbf8454" />
 
 You can create multiple separators within the same menu or submenu. The position of a separator depends on its name, as they are ordered alphabetically.<br>
-If you don't want separators in the menu, you can skip this step. <br>
-*Note:* Separators are only visible in "Menu with Submenus" mode.
 
-**5) ORDERING ITEMS** <br>
+**5) ARRANGEMENT OF ELEMENTS** <br>
+- **Predetermined**<br>
 By default, items (folder, subfolder, shortcut, separator) are sorted alphabetically, and will be sorted accordingly in the corresponding menu or submenu. <br>
-However, if you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The %01% prefix will not be displayed in the menu. <br>
+- **Personalized** <br>
+If you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The %01% prefix will not be displayed in the menu. <br>
 Subsequent items will be named %02%, %03%, etc. If an item does not have a prefix, it will be sorted alphabetically.
 
 <img width="752" height="423" alt="06a- Ordenamiento" src="https://github.com/user-attachments/assets/02dfcbc5-fb3a-43a5-b2b1-dea9af488771" />
@@ -92,9 +105,9 @@ Subsequent items will be named %02%, %03%, etc. If an item does not have a prefi
 **6) CREATING THE MENU** <br>
 **a)** Right-click on the created folder, such as "Multimedia", and click "Copy as path." This copies the folder path.
 
-<img width="655" height="372" alt="07a Copiar ruta carpeta" src="https://github.com/user-attachments/assets/eb86381f-e013-4aac-a9f3-c6b535cc6e16" />
+<img width="655" height="372" alt="07-Copiar ruta" src="https://github.com/user-attachments/assets/2849170e-ec12-43dc-9fd2-c8789541a550" />
 
-**b)** Right-click on the Stacky.exe file and select "Create shortcut."
+**b)** Right-click on the Stacky-plus.exe file and select "Create shortcut."
 
 <img width="655" height="338" alt="08a Copiar acceso directo Stacky" src="https://github.com/user-attachments/assets/ba07de49-ff20-4b23-92a3-1a426ce52528" />
 
@@ -102,15 +115,18 @@ Subsequent items will be named %02%, %03%, etc. If an item does not have a prefi
 
 **d)** Right-click on the shortcut and go to Properties.
 
-<img width="677" height="375" alt="11a Propiedades" src="https://github.com/user-attachments/assets/33a4e5af-b669-4363-b134-2a0ffe51f687" />
+<img width="677" height="375" alt="08-Propiedades acceso directo" src="https://github.com/user-attachments/assets/eb205769-3c75-4699-8a9c-bd3957cf6fef" />
 
 **e)** In the Target field, without deleting anything, go to the end of the text, leave a space, and paste (by pressing Ctrl+V on the keyboard) the folder path that was copied in step a). It should look something like this:
 
-`"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia"`
+`"C:\STACKY PLUS\stacky-plus.exe" "C:\STACKY PLUS\Multimedia"`
 
-<img width="363" height="509" alt="12- Casilla Destino" src="https://github.com/user-attachments/assets/6308ad0c-1688-4058-9794-3d579680d652" />
+<img width="363" height="509" alt="09-Pegar ruta en casilla Destino" src="https://github.com/user-attachments/assets/4f0976e2-d749-45a4-8a49-5aa94c8df840" />
 
-*Note:* If you have already completed this step, you can double-click the shortcut to open the created menu. The menu will open without icons. You must double-click it again to open the menu with icons. This allows you to verify that everything is correct before creating the button on the taskbar.
+If you have already completed this step, you can double-click the shortcut to open the created menu. The menu will open without icons. You must double-click it again to open the menu with icons. This allows you to verify that everything is correct before creating the button on the taskbar.
+
+<img width="677" height="522" alt="z12-Menú·abre·en·carpeta" src="https://github.com/user-attachments/assets/c288fe43-f557-420f-8c9a-16dd79ecdf79" />
+
 
 **f)** You can customize the shortcut icon by clicking "Change Icon" within Properties. This shortcut's icon will be the one that appears as the menu button on the Taskbar. <br>
 
@@ -120,121 +136,84 @@ Subsequent items will be named %02%, %03%, etc. If an item does not have a prefi
 
 **h)** Clicking the button created on the taskbar will open the menu. <br>
 The first time you open the menu, the icons may not be visible. In that case, click the button again to open the menu. This time, the icons should be visible. <br>
-*Note:* This only happens the first time the menu is opened, once it has been created, or when any modification is made to it.
+This only happens the first time the menu is opened, once it has been created, or when any modification is made to it.
 
 ## Shortcuts to Web Pages
 By default, website shortcuts display the browser icon (Chrome, Edge, Firefox, etc.). The icon shown in the menu can be customized in two ways:
 - Automatically with the website's favicon. To do this, access the website by clicking the shortcut in the created menu. Most icons are supported.
+
+<img width="373" height="140" alt="Pág-web" src="https://github.com/user-attachments/assets/4cb73a66-0933-4bdc-ac03-251e301f25c6" />
+
 - With an icon stored on your computer, by accessing the properties of the corresponding shortcut.
 
 ## Shortcuts to system files and hidden files
 System folders, such as Windows, Program Files, Program Files (x86), etc., are protected and have restricted access. The same applies to hidden folders, such as ProgramData, which contains shortcuts to all the applications visible in the Windows Start Menu. <br>
 If you want to create a menu made up of shortcuts to items located in system or hidden folders, it's recommended to create a folder inside the STACKY PLUS container folder. You could name it "SYSTEM," "APPLICATIONS," etc. Then, create (or copy) the shortcuts into this folder. This way, stacky.exe will not be restricted from displaying the icons correctly in the menu, and you'll be able to run the application or open the corresponding file.
 
-## MENU MODIFICATIONS
-- **MODIFYING ELEMENTS**. Changes can be made to folders and subfolders, even after the menu button has been created. You can add or remove shortcuts from the menu or submenu, add or remove submenu folders, separators, etc.
-After any changes, clicking the button in the taskbar will open the menu without icons. Clicking the button again will display the corresponding icons.
-- **MODIFYING MENU MODES AND FORMATS**
-Certain modifications require removing the button from the taskbar (unpinning it) and recreating it (dragging the modified shortcut to the taskbar). This applies the changes to the menu in the taskbar. This should be done when:
-    - *CHANGING THE MENU MODE*. For example, from Menu and Submenu mode to Icon Grid mode, or other modes.
-    - *CHANGING DARK MODE*. If you add or remove dark mode.
-    - *CHANGING THE NUMBER OF COLUMNS*. If you change the number of columns in Icon Grid or Named Icon Grid modes.
-    - *CHANGING THE ICON*. If you modify the icon of the shortcut that appears as a button in the taskbar.
+## Menu modes
+### **1) ICON GRID** <br>
+To make the created menu appear as a grid of icons, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
-## GRID MENU
-To display the menu as a grid of icons, right-click the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a space and add:
+`--iconmenu-NN`
 
-`--Options iconmenu-NN`
-
-NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type
-
-`--Options iconmenu-03`
+NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type `--iconmenu-03` <br>
 
 If you want the "Multimedia" folder to be displayed as a grid of icons, the Target field should look something like this:
 
-`"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-03`
+`"C:\STACKY PLUS\stacky-plus.exe" "C:\STACKY PLUS\Multimedia" --iconmenu-03`
 
-*Note:* In this menu mode, submenus and separators are not visible. Only the main menu shortcuts are shown.
+If you want the grid menu to have named icons, use:
 
-<img width="572" height="264" alt="00b- EscritorioW-Cuadrícula" src="https://github.com/user-attachments/assets/ab4a52c5-463d-4dc7-bf47-d6e84af2e99a" />
+`--iconmenu-NN-name`
 
-## GRID MENU WITH NAMES
-To display the created menu as a grid of icons with its name at the bottom, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
+NN should be replaced with a number indicating the number of columns to display.
+    In this menu mode, submenus and separators are not visible. Only the main menu shortcuts are shown.
 
-`--Options iconmenu-NN-name`
+<img width="572" height="239" alt="z11c- EscritorioW-Cuadríc-Cuadríc-name" src="https://github.com/user-attachments/assets/dfa3f4d1-26cd-4364-a989-fa0de45a0863" />
 
-NN should be replaced with a number indicating the number of columns to display. For example, to display a 3-column menu, type
+### **2) DOUBLE-COLUMN ICON MENU WITH SUBMENU** <br>
+To make the created menu appear as a 2-column grid of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
-`--Options iconmenu-03-name`
+`--iconmenu-C2`
 
-If you want the "Multimedia" folder to be displayed as a grid of named icons, the Target field should look something like this:
+If you want the menu to have named icons, use:
 
-`"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-03-name`
-
-*Note:* In this menu mode, submenus and separators are not visible. Only the main menu shortcuts are shown.
-
-<img width="572" height="239" alt="00c- EscritorioW-Cuadrícula-name" src="https://github.com/user-attachments/assets/5c231bab-3ca8-4bf5-8ffb-2be4ec4f4798" />
-
-## DOUBLE-COLUMN ICON MENU WITH SUBMENU <br>
-To display the created menu as a grid of two columns of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
-
-`--Options iconmenu-C2`
+`--iconmenu-C2-name`
 
 For example, if you want the "Multimedia" folder to be displayed as a double column of icons with submenus, the Target field should look similar to this:
 
-`"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2`
+`"C:\STACKY PLUS\stacky-plus.exe" "C:\STACKY PLUS\Multimedia" --iconmenu-C2`
 
-If any icon in the main menu corresponds to a submenu, it will open to the right or left, depending on its location. If there are multiple levels of submenus, they will all open to the right or left, as appropriate. <br>
-*Note:* In this menu mode, the separators are not visible.
+In this menu mode, the separators are not visible.
 
-<img width="572" height="341" alt="00d- EscritorioW-2C" src="https://github.com/user-attachments/assets/38997391-c825-4fb7-afa2-1bac2fbb8044" />
+<img width="572" height="384" alt="z13- EscritorioW-2C·y·2C·name" src="https://github.com/user-attachments/assets/ed2b14be-13e9-4b72-92e1-95ea732cfa42" />
 
-## DARK MODE <br>
+### **3) DOUBLE-ROW ICON MENU WITH SUBMENU** <br>
+To make the created menu appear as a grid of two rows of icons with submenus, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
+
+`--iconmenu-F2`
+
+If you want the menu to have named icons, you must use:
+
+`--iconmenu-F2-name`
+
+<img width="572" height="332" alt="z14- EscritorioW-2F·y·2F-name" src="https://github.com/user-attachments/assets/9a513bac-dd7e-4ce7-b7ff-7f58b453b19d" />
+
+## Dark Mode
 To display a menu in dark mode, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
 
 `--dark-mode`
 
 All menu types support dark mode. For example, if you want the "Multimedia" folder to be displayed as a dark mode menu, the Target field should look something like this:
 
-- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --dark-mode` for the default MENU WITH SUBMENU mode
+- `"C:\STACKY PLUS\stacky-plus.exe" "C:\STACKY PLUS\Multimedia" --dark-mode` for the default *menu with submenu* mode
 
-- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-NN --dark-mode` for GRID mode
+- `"C:\STACKY PLUS\stacky-plus.exe" "C:\STACKY PLUS\Multimedia" --iconmenu-C2 --dark-mode` for *double column of icons with submenu* mode
 
-- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-NN-name --dark-mode` for NAMED GRID mode
+and the same applies to other menu types.
 
-- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2 --dark-mode` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
+<img width="730" height="374" alt="z16aa- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/73954ecf-2c1d-4ffa-ba9f-31349ef719f1" />
+
+<img width="731" height="334" alt="z16bb- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/f86d0457-e032-4148-92cc-65281c6375ba" />
 
 <img width="713" height="395" alt="16a- EscritorioW-Modo oscuro" src="https://github.com/user-attachments/assets/bcd29b63-0dbe-43f7-bc5b-761d377efbe5" />
-
-## MINI ICON MODE <br>
-If you want a menu (and all of its submenus) to be displayed with smaller 16px icons instead of the default 32px icons, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
-
-`--mini`
-
-All menu types support this option. For example, if you want the "Multimedia" folder to be displayed with mini icons, the Target field should look something like this:
-
-- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --mini` for the default MENU WITH SUBMENU mode
-
-- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-NN --mini` for GRID mode
-
-- `"C:\STACKY PLUS\stacky.exe" "C:\STACKY PLUS\Multimedia" --Options iconmenu-C2 --mini` for DOUBLE COLUMN OF ICONS WITH SUBMENU mode
-
-Only the icon size is reduced; the text size remains unchanged. `--mini` can be combined with `--dark-mode` and any other option. <br>
-If you only want specific submenus to use mini icons instead of the whole menu, use the `.submenu-mini` folder termination described above instead of `--mini`.
-
-## SINGLE SUBMENU MODE <br>
-This mode keeps the main menu exactly like the default MENU WITH SUBMENU mode, but every submenu becomes a flat icon grid: no submenu can contain child submenus. To enable it, right-click on the corresponding shortcut, go to Properties, and at the end of the Target field (without deleting anything), leave a blank space and add:
-
-`--singlesubmenu`
-
-For example:
-
-- `"C:\STACKY PLUS\stacky-plus.exe" "C:\STACKY PLUS\Multimedia" --singlesubmenu`
-
-Do **not** use the `.submenu` termination in this mode. Each subfolder chooses one of three grid layout variants by its name ending (`NN` is the number of columns):
-
-- **Variant 1 (icon grid):** `.icononly-NN`. Example: `Music.icononly-4`.
-- **Variant 2 (name to the right):** `.NN-name-right`. The submenu has `NN` columns; the shortcut name is shown to the right of the icon, using the same font/size as the main menu. All columns share the same width (max 200px). If a name exceeds the max width it is truncated without ellipsis; if no name exceeds it, the column width shrinks to the longest name. Example: `Music.2-name-right`.
-- **Variant 3 (name below):** `.NN-name-below`. The submenu has `NN` columns, with 24px of horizontal padding and 8px of top padding around each icon. The shortcut name is shown directly below the icon (no gap), centered, spanning 1 or 2 lines, and may extend up to 16px into the empty space between icons. Long names are truncated without ellipsis. Example: `Music.3-name-below`.
-
-If a subfolder does not include any of these suffixes, it is not treated as a singlesubmenu (plain folders stay regular items). Use one of the three endings above to create a submenu.
