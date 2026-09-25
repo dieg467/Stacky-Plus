@@ -151,6 +151,16 @@ enum ThemeMode {
 
 // Timer IDs used by PopupWndProc
 static const UINT_PTR POPUP_TIMER_CLOSE_CHILD = 10;  // grace period before destroying child submenu
+static const UINT_PTR POPUP_TIMER_OPEN_CHILD  = 11;  // debounce delay before opening a hover-child submenu
+static const UINT     POPUP_OPEN_CHILD_DELAY_MS      = 80; // default "linger" delay when sweeping across rows
+static const UINT     POPUP_OPEN_CHILD_FAST_DELAY_MS = 12; // near-instant delay when the cursor is clearly heading into the submenu
+// Velocity threshold (pixels/ms) used to tell a deliberate move toward the
+// submenu arrow apart from a fast vertical sweep across unrelated rows: if
+// the cursor's vertical speed is below this and/or horizontal speed exceeds
+// vertical speed, the row is opened almost immediately instead of waiting
+// out the full debounce (mirrors the direction heuristic classic Win32/
+// Explorer menus use for hover-opening submenus).
+static const double   POPUP_SUB_OPEN_VY_THRESHOLD = 0.35;
 
 // State passed as lpCreateParams when creating each popup window.
 struct PopupState {
@@ -161,6 +171,26 @@ struct PopupState {
 	int    hotSubIdx  = -1;      // cache item index of the hover-child
 	int    hotItem    = -1;      // hovered row index, replaces g_hotItem
 	bool   closePending = false; // WM_MOUSELEAVE fired but grace period active
+	// Debounces opening a hover-child submenu: creating/destroying a
+	// top-level popup window on every WM_MOUSEMOVE that crosses a submenu
+	// row is expensive enough (window creation + DWM composition) that
+	// quickly sweeping the mouse across a list with several submenus makes
+	// the highlight rectangle appear to visually "split" - the side near
+	// the submenu arrow lags behind the rest of the row while Windows
+	// finishes creating/tearing down the child popup. Instead of opening
+	// immediately on hover, a short timer is armed; the child popup is only
+	// actually created if the cursor still sits on the same submenu row
+	// once the timer fires.
+	int    pendingSubIdx = -1;     // submenu row index a timer is currently pending for (-1 = none)
+	String pendingSubPrefix;       // submenu prefix matching pendingSubIdx
+	int    pendingSubY    = 0;     // row top (client y) captured when the timer was armed
+
+	// Tracks the previous WM_MOUSEMOVE point/time so the hover logic can tell
+	// a deliberate move toward a submenu arrow (mostly horizontal, unhurried)
+	// apart from a fast vertical sweep across several rows, and shorten the
+	// debounce delay accordingly (see POPUP_SUB_OPEN_VY_THRESHOLD).
+	POINT  lastMovePt  = { -1, -1 };
+	DWORD  lastMoveTick = 0;
 };
 
 // Hook procedure to intercept menu window creation
@@ -205,6 +235,7 @@ enum {
 	// Right-click context menu (shortcut icons), used by PopupWndProc/GridWndProc.
 	WM_CTX_OPEN_SHORTCUT_LOCATION = WM_BASE + 14,
 	WM_CTX_RUN_AS_ADMIN           = WM_BASE + 15,
+	WM_CTX_OPEN_SETTINGS          = WM_BASE + 16,
 
 	APP_EXIT_DELAY = 3 * 1000,
 
@@ -1361,20 +1392,21 @@ struct Util {
 		const wchar_t* close_menu;
 		const wchar_t* open_shortcut_location;
 		const wchar_t* run_as_admin;
+		const wchar_t* settings;
 	};
 
 	static const SubmenuCtxMenuStrings& GetSubmenuCtxMenuStrings() {
 		static const SubmenuCtxMenuStrings table[] = {
-			{ L"en", L"Open subfolder",           L"Open main menu folder",              L"Open Stacky-plus.exe folder",        L"Close this context menu", L"Open shortcut location", L"Run as administrator" },
-			{ L"es", L"Abrir subcarpeta",         L"Abrir carpeta del men\u00FA principal", L"Abrir carpeta de Stacky-plus.exe", L"Cerrar este men\u00FA contextual", L"Abrir ubicaci\u00F3n del acceso directo", L"Ejecutar como administrador" },
-			{ L"pt", L"Abrir subpasta",           L"Abrir pasta do menu principal",      L"Abrir pasta do Stacky-plus.exe",     L"Fechar este menu de contexto", L"Abrir local do atalho", L"Executar como administrador" },
-			{ L"fr", L"Ouvrir le sous-dossier",   L"Ouvrir le dossier du menu principal",L"Ouvrir le dossier de Stacky-plus.exe", L"Fermer ce menu contextuel", L"Ouvrir l'emplacement du raccourci", L"Ex\u00E9cuter en tant qu'administrateur" },
-			{ L"de", L"Unterordner \u00F6ffnen",  L"Hauptmen\u00FC-Ordner \u00F6ffnen",  L"Stacky-plus.exe-Ordner \u00F6ffnen", L"Dieses Kontextmen\u00FC schlie\u00DFen", L"Verkn\u00FCpfungsspeicherort \u00F6ffnen", L"Als Administrator ausf\u00FChren" },
-			{ L"it", L"Apri sottocartella",       L"Apri cartella del menu principale",  L"Apri cartella di Stacky-plus.exe",   L"Chiudi questo menu contestuale", L"Apri percorso collegamento", L"Esegui come amministratore" },
-			{ L"pl", L"Otw\u00F3rz podfolder",    L"Otw\u00F3rz folder menu g\u0142\u00F3wnego", L"Otw\u00F3rz folder Stacky-plus.exe", L"Zamknij to menu kontekstowe", L"Otw\u00F3rz lokalizacj\u0119 skr\u00F3tu", L"Uruchom jako administrator" },
-			{ L"ru", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u043E\u0434\u043F\u0430\u043F\u043A\u0443", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0430\u043F\u043A\u0443 \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u043C\u0435\u043D\u044E", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0430\u043F\u043A\u0443 Stacky-plus.exe", L"\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u044D\u0442\u043E \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043C\u0435\u0441\u0442\u043E\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u044F\u0440\u043B\u044B\u043A\u0430", L"\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u043E\u0442 \u0438\u043C\u0435\u043D\u0438 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430" },
-			{ L"zh", L"\u6253\u5F00\u5B50\u6587\u4EF6\u5939", L"\u6253\u5F00\u4E3B\u83DC\u5355\u6587\u4EF6\u5939", L"\u6253\u5F00 Stacky-plus.exe \u6587\u4EF6\u5939", L"\u5173\u95ED\u6B64\u5FEB\u6377\u83DC\u5355", L"\u6253\u5F00\u5FEB\u6377\u65B9\u5F0F\u4F4D\u7F6E", L"\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u8FD0\u884C" },
-			{ L"ja", L"\u30B5\u30D6\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"\u30E1\u30A4\u30F3\u30E1\u30CB\u30E5\u30FC\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"Stacky-plus.exe\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"\u3053\u306E\u30B3\u30F3\u30C6\u30AD\u30B9\u30C8\u30E1\u30CB\u30E5\u30FC\u3092\u9589\u3058\u308B", L"\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8\u306E\u4FDD\u5B58\u5834\u6240\u3092\u958B\u304F", L"\u7BA1\u7406\u8005\u3068\u3057\u3066\u5B9F\u884C" },
+			{ L"en", L"Open subfolder",           L"Open main menu folder",              L"Open Stacky-plus.exe folder",        L"Close this context menu", L"Open shortcut location", L"Run as administrator", L"Settings" },
+			{ L"es", L"Abrir subcarpeta",         L"Abrir carpeta del men\u00FA principal", L"Abrir carpeta de Stacky-plus.exe", L"Cerrar este men\u00FA contextual", L"Abrir ubicaci\u00F3n del acceso directo", L"Ejecutar como administrador", L"Configuraci\u00F3n" },
+			{ L"pt", L"Abrir subpasta",           L"Abrir pasta do menu principal",      L"Abrir pasta do Stacky-plus.exe",     L"Fechar este menu de contexto", L"Abrir local do atalho", L"Executar como administrador", L"Configura\u00E7\u00E3o" },
+			{ L"fr", L"Ouvrir le sous-dossier",   L"Ouvrir le dossier du menu principal",L"Ouvrir le dossier de Stacky-plus.exe", L"Fermer ce menu contextuel", L"Ouvrir l'emplacement du raccourci", L"Ex\u00E9cuter en tant qu'administrateur", L"Param\u00E8tres" },
+			{ L"de", L"Unterordner \u00F6ffnen",  L"Hauptmen\u00FC-Ordner \u00F6ffnen",  L"Stacky-plus.exe-Ordner \u00F6ffnen", L"Dieses Kontextmen\u00FC schlie\u00DFen", L"Verkn\u00FCpfungsspeicherort \u00F6ffnen", L"Als Administrator ausf\u00FChren", L"Einstellungen" },
+			{ L"it", L"Apri sottocartella",       L"Apri cartella del menu principale",  L"Apri cartella di Stacky-plus.exe",   L"Chiudi questo menu contestuale", L"Apri percorso collegamento", L"Esegui come amministratore", L"Impostazioni" },
+			{ L"pl", L"Otw\u00F3rz podfolder",    L"Otw\u00F3rz folder menu g\u0142\u00F3wnego", L"Otw\u00F3rz folder Stacky-plus.exe", L"Zamknij to menu kontekstowe", L"Otw\u00F3rz lokalizacj\u0119 skr\u00F3tu", L"Uruchom jako administrator", L"Ustawienia" },
+			{ L"ru", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u043E\u0434\u043F\u0430\u043F\u043A\u0443", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0430\u043F\u043A\u0443 \u0433\u043B\u0430\u0432\u043D\u043E\u0433\u043E \u043C\u0435\u043D\u044E", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043F\u0430\u043F\u043A\u0443 Stacky-plus.exe", L"\u0417\u0430\u043A\u0440\u044B\u0442\u044C \u044D\u0442\u043E \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u043D\u043E\u0435 \u043C\u0435\u043D\u044E", L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u043C\u0435\u0441\u0442\u043E\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u044F\u0440\u043B\u044B\u043A\u0430", L"\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u043E\u0442 \u0438\u043C\u0435\u043D\u0438 \u0430\u0434\u043C\u0438\u043D\u0438\u0441\u0442\u0440\u0430\u0442\u043E\u0440\u0430", L"\u041F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B" },
+			{ L"zh", L"\u6253\u5F00\u5B50\u6587\u4EF6\u5939", L"\u6253\u5F00\u4E3B\u83DC\u5355\u6587\u4EF6\u5939", L"\u6253\u5F00 Stacky-plus.exe \u6587\u4EF6\u5939", L"\u5173\u95ED\u6B64\u5FEB\u6377\u83DC\u5355", L"\u6253\u5F00\u5FEB\u6377\u65B9\u5F0F\u4F4D\u7F6E", L"\u4EE5\u7BA1\u7406\u5458\u8EAB\u4EFD\u8FD0\u884C", L"\u8BBE\u7F6E" },
+			{ L"ja", L"\u30B5\u30D6\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"\u30E1\u30A4\u30F3\u30E1\u30CB\u30E5\u30FC\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"Stacky-plus.exe\u306E\u30D5\u30A9\u30EB\u30C0\u30FC\u3092\u958B\u304F", L"\u3053\u306E\u30B3\u30F3\u30C6\u30AD\u30B9\u30C8\u30E1\u30CB\u30E5\u30FC\u3092\u9589\u3058\u308B", L"\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8\u306E\u4FDD\u5B58\u5834\u6240\u3092\u958B\u304F", L"\u7BA1\u7406\u8005\u3068\u3057\u3066\u5B9F\u884C", L"\u8A2D\u5B9A" },
 		};
 		String code = GetUILanguageCode();
 		for (const auto& row : table) {
@@ -1562,6 +1594,114 @@ struct Util {
 		HBITMAP bmp = CreateArgbBitmapFromIcon(sii.hIcon, size);
 		::DestroyIcon(sii.hIcon);
 		return bmp;
+	}
+
+	// Gear/settings icon, used for the "Settings" / "Configuraci\u00F3n" context-menu
+	// entry that opens the Configuration window. Uses SHGetStockIconInfo with a
+	// stable SIID_* stock-icon id instead of a fixed shell32.dll icon index:
+	// numeric indexes inside shell32.dll are not guaranteed to be stable across
+	// Windows versions/builds, so the same index can resolve to a different
+	// icon on another PC. SIID_SETTINGS (Windows 10 1809+) is preferred; older
+	// systems fall back to SIID_SOFTWARE, which SHGetStockIconInfo supports
+	// since Windows Vista.
+	static HBITMAP CreateSettingsGearBitmap_UnusedStock(int size) {
+		SHSTOCKICONINFO sii = { sizeof(sii) };
+		if (FAILED(::SHGetStockIconInfo(SIID_SETTINGS, SHGSI_ICON, &sii))) {
+			sii = SHSTOCKICONINFO{ sizeof(sii) };
+			if (FAILED(::SHGetStockIconInfo(SIID_SOFTWARE, SHGSI_ICON, &sii))) return nullptr;
+		}
+		HBITMAP bmp = CreateArgbBitmapFromIcon(sii.hIcon, size);
+		::DestroyIcon(sii.hIcon);
+		return bmp;
+	}
+
+	// Gear/settings icon, used for the "Settings" / "Configuración" context-menu
+	// entry that opens the Configuration window. Drawn procedurally with GDI
+	// (same approach as CreateRedCrossBitmap) instead of relying on a shell
+	// stock icon: fixed shell32.dll icon indexes are not stable across Windows
+	// versions/builds (a given index can resolve to a different icon on
+	// another PC), and SHGetStockIconInfo(SIID_SETTINGS, ...) is not reliably
+	// available/renderable on every Windows build either, which previously
+	// left the menu entry without a visible icon. Drawing the gear ourselves
+	// guarantees it always renders identically everywhere.
+	static HBITMAP CreateSettingsGearBitmap(int size) {
+		BITMAPINFO bmi = { 0 };
+		bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+		bmi.bmiHeader.biWidth       = size;
+		bmi.bmiHeader.biHeight      = -size; // top-down
+		bmi.bmiHeader.biPlanes      = 1;
+		bmi.bmiHeader.biBitCount    = 32;
+		bmi.bmiHeader.biCompression = BI_RGB;
+		BYTE* bits = nullptr;
+		HBITMAP dest = ::CreateDIBSection(GetDC(0), &bmi, DIB_RGB_COLORS, (void**)&bits, 0, 0);
+		if (!dest || !bits) return dest;
+		memset(bits, 0, (size_t)size * size * 4);
+
+		HDC memDC = CreateCompatibleDC(nullptr);
+		HGDIOBJ oldBmp = SelectObject(memDC, dest);
+
+		HBRUSH brush = CreateSolidBrush(RGB(90, 90, 90));
+		HGDIOBJ oldBrush = SelectObject(memDC, brush);
+		HPEN pen = CreatePen(PS_SOLID, 1, RGB(90, 90, 90));
+		HGDIOBJ oldPen = SelectObject(memDC, pen);
+
+		POINT center{ size / 2, size / 2 };
+		double outerR = size * 0.46;
+		double toothR = size * 0.40; // radius where teeth tips reach
+		const int toothCount = 8;
+
+		// Build a gear-shaped polygon by alternating between the body radius
+		// and the tooth-tip radius around the circle.
+		const int pointsPerTooth = 4;
+		const int totalPoints = toothCount * pointsPerTooth;
+		POINT poly[totalPoints];
+		for (int i = 0; i < totalPoints; ++i) {
+			double angle = (2.0 * 3.14159265358979 * i) / totalPoints;
+			int phase = i % pointsPerTooth;
+			double r = (phase == 1 || phase == 2) ? toothR : outerR;
+			poly[i].x = center.x + (LONG)(r * cos(angle));
+			poly[i].y = center.y + (LONG)(r * sin(angle));
+		}
+		Polygon(memDC, poly, totalPoints);
+
+		// Punch the center hole out so it reads as a gear rather than a solid disc.
+		// Fill it with pure black (RGB 0,0,0): the alpha-derivation pass below
+		// treats fully black pixels as fully transparent, so this actually
+		// "erases" the gear body instead of just drawing an outline over it.
+		HBRUSH holeBrush = CreateSolidBrush(RGB(0, 0, 0));
+		HGDIOBJ oldHoleBrush = SelectObject(memDC, holeBrush);
+		HPEN holePen = CreatePen(PS_SOLID, 1, RGB(0, 0, 0));
+		HGDIOBJ oldHolePen = SelectObject(memDC, holePen);
+		int hr = (int)(size * 0.16);
+		Ellipse(memDC, center.x - hr, center.y - hr, center.x + hr, center.y + hr);
+		SelectObject(memDC, oldHolePen);
+		SelectObject(memDC, oldHoleBrush);
+		DeleteObject(holePen);
+		DeleteObject(holeBrush);
+
+		SelectObject(memDC, oldPen);
+		SelectObject(memDC, oldBrush);
+		DeleteObject(pen);
+		DeleteObject(brush);
+		SelectObject(memDC, oldBmp);
+		DeleteDC(memDC);
+
+		// GDI shape drawing does not set the alpha channel; derive alpha from
+		// how far each pixel's color is from transparent black so the gear
+		// composites correctly via AlphaBlend/premultiplied-alpha menu bitmaps.
+		size_t pixelCount = (size_t)size * size;
+		for (size_t i = 0; i < pixelCount; ++i) {
+			BYTE* px = bits + i * 4; // B, G, R, A
+			BYTE maxc = max(px[0], max(px[1], px[2]));
+			BYTE alpha = maxc;
+			if (alpha == 0) continue;
+			px[0] = (BYTE)((int)px[0] * alpha / 255);
+			px[1] = (BYTE)((int)px[1] * alpha / 255);
+			px[2] = (BYTE)((int)px[2] * alpha / 255);
+			px[3] = alpha;
+		}
+
+		return dest;
 	}
 };
 
@@ -2110,6 +2250,18 @@ struct Cache {
 		return true;
 	}
 
+	// Unconditionally rebuilds the cache from the already-scanned directory
+	// contents, regardless of what is_outdated() would say. Used by
+	// RebuildStackyCache() (called from the Configuration window right after
+	// saving a ".stacky-config") because editing a hidden config file doesn't
+	// reliably bump the containing folder's modification time on NTFS, so
+	// is_outdated()'s timestamp heuristic can miss the change and leave the
+	// stale cache (e.g. an outdated mini_icons flag) in place.
+	void force_rebuild() {
+		rebuild();
+		was_rebuilt = true;
+	}
+
 private:
 	Time        last_modified;
 	StringList  scanned_items;
@@ -2167,10 +2319,17 @@ private:
 // Configuration window itself right after saving ".stacky-config" avoids
 // that altogether: the cache on disk is already fresh and correct before the
 // menu is ever opened again.
+//
+// Note: this always force-rebuilds (via force_rebuild(), not load()),
+// because is_outdated()'s timestamp-based staleness check can miss a
+// ".stacky-config" edit (editing a hidden file doesn't reliably bump the
+// containing folder's own modification time on NTFS), which previously
+// caused toggled settings like "mini icons" to sometimes not take effect
+// after clicking "Guardar".
 void RebuildStackyCache(const std::wstring& folderPath) {
 	Cache cache(folderPath);
 	if (cache.scan()) {
-		cache.load();
+		cache.force_rebuild();
 	}
 }
 
@@ -2410,6 +2569,16 @@ struct App {
 		while (GetMessage(&msg, nullptr, 0, 0)) DispatchMessage(&msg);
 	}
 
+	// Launches a fresh stacky-plus.exe process with no arguments, which opens
+	// the advanced Configuration window (see wWinMain's ERR_PATH_MISSING/empty
+	// command-line branch). Used by the "Settings"/"Configuraci\u00F3n" context-menu
+	// entry so it doesn't need to run the config UI's own message loop nested
+	// inside this already-running popup/grid instance.
+	void LaunchConfigWindow() {
+		String exePath = Util::GetExeFolder() + L"\\" + STACKY_EXEC_NAME;
+		ShellExecute(nullptr, nullptr, exePath.c_str(), L"", nullptr, SW_SHOWNORMAL);
+	}
+
 	// Build and show the right-click context menu for a submenu-folder icon.
 	// owner: window that will own the popup (its DPI is used for icon scaling).
 	// submenu_path: absolute path of the target .submenu / .submenu-mini folder.
@@ -2419,10 +2588,11 @@ struct App {
 		int px = MulDiv(16, dpi, 96);
 		const auto& S = Util::GetSubmenuCtxMenuStrings();
 
-		HBITMAP bmpTree   = Util::CreateFolderTreeBitmap(px);
-		HBITMAP bmpFolder = Util::CreateStockFolderBitmap(px);
-		HBITMAP bmpStacky = Util::CreateStackyExeBitmap(px);
-		HBITMAP bmpCross  = Util::CreateRedCrossBitmap(px);
+		HBITMAP bmpTree     = Util::CreateFolderTreeBitmap(px);
+		HBITMAP bmpFolder   = Util::CreateStockFolderBitmap(px);
+		HBITMAP bmpStacky   = Util::CreateStackyExeBitmap(px);
+		HBITMAP bmpCross    = Util::CreateRedCrossBitmap(px);
+		HBITMAP bmpSettings = Util::CreateSettingsGearBitmap(px);
 
 		HMENU ctxMenu = CreatePopupMenu();
 
@@ -2452,6 +2622,18 @@ struct App {
 		sep.fType = MFT_SEPARATOR;
 		InsertMenuItem(ctxMenu, -1, TRUE, &sep);
 
+		MENUITEMINFO miiSettings{ sizeof(miiSettings) };
+		miiSettings.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		miiSettings.dwTypeData = (LPWSTR)S.settings;
+		miiSettings.wID = WM_CTX_OPEN_SETTINGS;
+		miiSettings.hbmpItem = bmpSettings;
+		InsertMenuItem(ctxMenu, -1, TRUE, &miiSettings);
+
+		MENUITEMINFO sep2{ sizeof(sep2) };
+		sep2.fMask = MIIM_FTYPE;
+		sep2.fType = MFT_SEPARATOR;
+		InsertMenuItem(ctxMenu, -1, TRUE, &sep2);
+
 		MENUITEMINFO mii4{ sizeof(mii4) };
 		mii4.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
 		mii4.dwTypeData = (LPWSTR)S.close_menu;
@@ -2474,10 +2656,11 @@ struct App {
 		RestoreFocusToRootMenuWindow(owner);
 
 		DestroyMenu(ctxMenu);
-		if (bmpTree)   DeleteObject(bmpTree);
-		if (bmpFolder) DeleteObject(bmpFolder);
-		if (bmpStacky) DeleteObject(bmpStacky);
-		if (bmpCross)  DeleteObject(bmpCross);
+		if (bmpTree)     DeleteObject(bmpTree);
+		if (bmpFolder)   DeleteObject(bmpFolder);
+		if (bmpStacky)   DeleteObject(bmpStacky);
+		if (bmpCross)    DeleteObject(bmpCross);
+		if (bmpSettings) DeleteObject(bmpSettings);
 
 		switch (cmd) {
 		case WM_CTX_OPEN_SUBFOLDER:
@@ -2488,6 +2671,9 @@ struct App {
 			break;
 		case WM_CTX_OPEN_STACKY_FOLDER:
 			ShellExecute(nullptr, nullptr, Util::GetExeFolder().c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		case WM_CTX_OPEN_SETTINGS:
+			LaunchConfigWindow();
 			break;
 		case WM_CTX_CLOSE_MENU:
 			// Intentionally no-op: the context menu is already closed at this point
@@ -2501,8 +2687,11 @@ struct App {
 	// Build and show the right-click context menu for a shortcut (non-submenu) icon.
 	// owner: window that will own the popup (its DPI is used for icon scaling).
 	// shortcut_path: absolute path of the target shortcut/file.
+	// isRoot: true if this shortcut lives directly in the root menu folder, in
+	// which case the "Open shortcut location" entry is omitted (it would just
+	// open the same folder as "Open main menu folder").
 	// Returns after the user picks an item (or dismisses the menu) and performs the action.
-	void ShowShortcutContextMenu(HWND owner, const String& shortcut_path) {
+	void ShowShortcutContextMenu(HWND owner, const String& shortcut_path, bool isRoot) {
 		UINT dpi = GetDpiForWindow(owner);
 		int px = MulDiv(16, dpi, 96);
 		const auto& S = Util::GetSubmenuCtxMenuStrings();
@@ -2521,11 +2710,12 @@ struct App {
 		size_t targetExtPos = targetPath.find_last_of(L'.');
 		bool isExe = targetExtPos != String::npos && _wcsicmp(targetPath.c_str() + targetExtPos, L".exe") == 0;
 
-		HBITMAP bmpOpenFolder = Util::CreateOpenFolderBitmap(px);
+		HBITMAP bmpOpenFolder = isRoot ? nullptr : Util::CreateOpenFolderBitmap(px);
 		HBITMAP bmpFolder     = Util::CreateStockFolderBitmap(px);
 		HBITMAP bmpStacky     = Util::CreateStackyExeBitmap(px);
 		HBITMAP bmpCross      = Util::CreateRedCrossBitmap(px);
 		HBITMAP bmpShield     = isExe ? Util::CreateShieldBitmap(px) : nullptr;
+		HBITMAP bmpSettings   = Util::CreateSettingsGearBitmap(px);
 
 		HMENU ctxMenu = CreatePopupMenu();
 
@@ -2543,12 +2733,14 @@ struct App {
 			InsertMenuItem(ctxMenu, -1, TRUE, &sepAdmin);
 		}
 
-		MENUITEMINFO mii{ sizeof(mii) };
-		mii.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii.dwTypeData = (LPWSTR)S.open_shortcut_location;
-		mii.wID = WM_CTX_OPEN_SHORTCUT_LOCATION;
-		mii.hbmpItem = bmpOpenFolder;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii);
+		if (!isRoot) {
+			MENUITEMINFO mii{ sizeof(mii) };
+			mii.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+			mii.dwTypeData = (LPWSTR)S.open_shortcut_location;
+			mii.wID = WM_CTX_OPEN_SHORTCUT_LOCATION;
+			mii.hbmpItem = bmpOpenFolder;
+			InsertMenuItem(ctxMenu, -1, TRUE, &mii);
+		}
 
 		MENUITEMINFO mii2{ sizeof(mii2) };
 		mii2.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
@@ -2568,6 +2760,18 @@ struct App {
 		sep.fMask = MIIM_FTYPE;
 		sep.fType = MFT_SEPARATOR;
 		InsertMenuItem(ctxMenu, -1, TRUE, &sep);
+
+		MENUITEMINFO miiSettings{ sizeof(miiSettings) };
+		miiSettings.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
+		miiSettings.dwTypeData = (LPWSTR)S.settings;
+		miiSettings.wID = WM_CTX_OPEN_SETTINGS;
+		miiSettings.hbmpItem = bmpSettings;
+		InsertMenuItem(ctxMenu, -1, TRUE, &miiSettings);
+
+		MENUITEMINFO sep2{ sizeof(sep2) };
+		sep2.fMask = MIIM_FTYPE;
+		sep2.fType = MFT_SEPARATOR;
+		InsertMenuItem(ctxMenu, -1, TRUE, &sep2);
 
 		MENUITEMINFO mii4{ sizeof(mii4) };
 		mii4.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
@@ -2596,6 +2800,7 @@ struct App {
 		if (bmpStacky)     DeleteObject(bmpStacky);
 		if (bmpCross)      DeleteObject(bmpCross);
 		if (bmpShield)     DeleteObject(bmpShield);
+		if (bmpSettings)   DeleteObject(bmpSettings);
 
 		switch (cmd) {
 		case WM_CTX_RUN_AS_ADMIN: {
@@ -2623,6 +2828,9 @@ struct App {
 			break;
 		case WM_CTX_OPEN_STACKY_FOLDER:
 			ShellExecute(nullptr, nullptr, Util::GetExeFolder().c_str(), nullptr, nullptr, SW_NORMAL);
+			break;
+		case WM_CTX_OPEN_SETTINGS:
+			LaunchConfigWindow();
 			break;
 		case WM_CTX_CLOSE_MENU:
 			// Intentionally no-op: the context menu is already closed at this point
@@ -4132,6 +4340,27 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		}
 
 		// --- Hover submenu logic ---
+		// Estimate how "deliberately" the cursor is heading toward the submenu
+		// arrow versus just sweeping vertically across unrelated rows, using
+		// the distance/time since the previous WM_MOUSEMOVE. A slow-vertical /
+		// horizontal-leaning move is treated as intentional and opens almost
+		// immediately; a fast vertical sweep keeps the full debounce so the
+		// highlight doesn't visually "split" while windows are torn down.
+		DWORD nowTick = GetTickCount();
+		UINT openDelay = POPUP_OPEN_CHILD_DELAY_MS;
+		if (state->lastMovePt.x != -1) {
+			DWORD dt = nowTick - state->lastMoveTick;
+			if (dt == 0) dt = 1;
+			double dx = (double)abs(pt.x - state->lastMovePt.x);
+			double dy = (double)abs(pt.y - state->lastMovePt.y);
+			double vy = dy / (double)dt;
+			if (vy <= POPUP_SUB_OPEN_VY_THRESHOLD || dx >= dy) {
+				openDelay = POPUP_OPEN_CHILD_FAST_DELAY_MS;
+			}
+		}
+		state->lastMovePt = pt;
+		state->lastMoveTick = nowTick;
+
 		if (newHotSubIdx != state->hotSubIdx) {
 			// Close previous child if different row
 			if (state->childHwnd && IsWindow(state->childHwnd)) {
@@ -4140,9 +4369,69 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 			}
 			state->hotSubIdx = newHotSubIdx;
 
+			// Cancel any debounce timer left over from a previously-hovered
+			// submenu row; a new one (if applicable) is armed below.
+			KillTimer(hwnd, POPUP_TIMER_OPEN_CHILD);
+			state->pendingSubIdx = -1;
+
 			if (newHotSubIdx != -1) {
+				// Don't open the child popup immediately in the general case:
+				// creating/destroying a top-level window on every row crossed
+				// while sweeping the mouse quickly is what makes the highlight
+				// look "split" (see PopupState::pendingSubIdx comment). Only
+				// arm a short timer here; WM_TIMER actually creates the child
+				// if the cursor is still on this same row once it fires. When
+				// the direction heuristic above indicates a deliberate move
+				// toward this row, openDelay is shortened so it feels instant.
+				state->pendingSubIdx = newHotSubIdx;
+				state->pendingSubPrefix = newSubPrefix;
+				state->pendingSubY = y; // row top (client y), matches the value used below
+				SetTimer(hwnd, POPUP_TIMER_OPEN_CHILD, openDelay, nullptr);
+			}
+		}
+
+		TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
+		TrackMouseEvent(&tme);
+		return 0;
+	}
+
+	case WM_MOUSELEAVE: {
+		auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+		if (state) {
+			if (state->hotItem != -1) {
+				state->hotItem = -1;
+				InvalidateRect(hwnd, nullptr, FALSE);
+			}
+			// Reset move tracking so re-entering the popup doesn't compute a
+			// bogus velocity from a stale point captured before the cursor left.
+			state->lastMovePt = { -1, -1 };
+			// Don't destroy the child immediately: the cursor may be crossing the
+			// 1-px gap between parent and child. Use a short grace-period timer.
+			if (state->childHwnd && IsWindow(state->childHwnd)) {
+				state->closePending = true;
+				SetTimer(hwnd, POPUP_TIMER_CLOSE_CHILD, 150, nullptr);
+			} else {
+				state->hotSubIdx = -1;
+			}
+		}
+		return 0;
+	}
+
+	case WM_TIMER: {
+		if (wParam == POPUP_TIMER_OPEN_CHILD) {
+			KillTimer(hwnd, POPUP_TIMER_OPEN_CHILD);
+			auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+			App* app = state ? state->app : nullptr;
+			// Only open if the cursor is still on the same submenu row that
+			// armed this timer (hotSubIdx didn't change while waiting).
+			if (app && state && state->pendingSubIdx != -1 && state->pendingSubIdx == state->hotSubIdx
+				&& !(state->childHwnd && IsWindow(state->childHwnd))) {
+				PopupLayout L = MakeLayout(hwnd, app->IconPxFor(state->prefix));
+				int y = state->pendingSubY;
+				const String& newSubPrefix = state->pendingSubPrefix;
+
 				RECT wr; GetWindowRect(hwnd, &wr);
-				POINT mid = { 0, y + L.itemH / 2 }; // y was left at the matching row top
+				POINT mid = { 0, y + L.itemH / 2 };
 				ClientToScreen(hwnd, &mid);
 				int sx = wr.right;
 				int sy = mid.y;
@@ -4213,33 +4502,8 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					}
 				}
 			}
+			if (state) state->pendingSubIdx = -1;
 		}
-
-		TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd, 0 };
-		TrackMouseEvent(&tme);
-		return 0;
-	}
-
-	case WM_MOUSELEAVE: {
-		auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
-		if (state) {
-			if (state->hotItem != -1) {
-				state->hotItem = -1;
-				InvalidateRect(hwnd, nullptr, FALSE);
-			}
-			// Don't destroy the child immediately: the cursor may be crossing the
-			// 1-px gap between parent and child. Use a short grace-period timer.
-			if (state->childHwnd && IsWindow(state->childHwnd)) {
-				state->closePending = true;
-				SetTimer(hwnd, POPUP_TIMER_CLOSE_CHILD, 150, nullptr);
-			} else {
-				state->hotSubIdx = -1;
-			}
-		}
-		return 0;
-	}
-
-	case WM_TIMER: {
 		if (wParam == POPUP_TIMER_CLOSE_CHILD) {
 			KillTimer(hwnd, POPUP_TIMER_CLOSE_CHILD);
 			auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
@@ -4254,7 +4518,7 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 						state->childHwnd = nullptr;
 						state->hotSubIdx  = -1;
 					}
-					// else: cursor entered child � keep it alive
+					// else: cursor entered child — keep it alive
 				}
 			}
 		}
@@ -4342,7 +4606,7 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 						app->ShowSubfolderContextMenu(hwnd, submenu_path);
 					} else if (!isSep) {
 						String shortcut_path = app->cache->path(it.name);
-						app->ShowShortcutContextMenu(hwnd, shortcut_path);
+						app->ShowShortcutContextMenu(hwnd, shortcut_path, isRoot);
 					}
 					return 0;
 				}
@@ -5275,7 +5539,7 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     gs->app->ShowSubfolderContextMenu(hwnd, submenu_path);
                 } else {
                     String shortcut_path = gs->app->cache->path(ci.name);
-                    gs->app->ShowShortcutContextMenu(hwnd, shortcut_path);
+                    gs->app->ShowShortcutContextMenu(hwnd, shortcut_path, gs->prefix.empty());
                 }
                 return 0;
             }

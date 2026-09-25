@@ -1,4 +1,4 @@
-// stacky_config_ui.cpp
+﻿// stacky_config_ui.cpp
 // Advanced Configuration window implementation ("CONFIGURACIÓN DE STACKY-PLUS").
 // See stacky_config_ui.h for the entry point used from stacky.cpp's wWinMain.
 //
@@ -38,7 +38,351 @@
 namespace {
 
 const wchar_t* kConfigWndClass = L"stacky_config_wnd";
-const wchar_t* kConfigWndTitle = L"Configuración de Stacky-Plus";
+
+// Return the two-letter ISO 639-1 language code of the current user's UI
+// language (e.g. L"en", L"es", L"fr"...), lowercase. Falls back to L"en" on
+// failure. Kept in sync with stacky.cpp's Util::GetUILanguageCode(), which
+// lives in a different translation unit and isn't reachable from here.
+std::wstring GetUILanguageCode() {
+	WCHAR name[LOCALE_NAME_MAX_LENGTH] = { 0 };
+	if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0 && name[0] && name[1]) {
+		WCHAR code[3] = { (WCHAR)towlower(name[0]), (WCHAR)towlower(name[1]), 0 };
+		return std::wstring(code);
+	}
+	return L"en";
+}
+
+// Extensible translation table for every fixed string shown by the
+// Configuration window (title, labels, checkboxes/buttons, combo box
+// options and MessageBox text). Add new languages here as additional rows
+// (2-letter ISO 639-1 code + fields in declaration order). English is the
+// default/fallback for any language not listed.
+struct ConfigUIStrings {
+	const wchar_t* lang;
+	const wchar_t* windowTitle;
+	const wchar_t* selectMenuOnLeft;
+	const wchar_t* lblName;
+	const wchar_t* lblIcon;
+	const wchar_t* btnChangeIcon;
+	const wchar_t* checkMini;
+	const wchar_t* lblTheme;
+	const wchar_t* lblPosition;
+	const wchar_t* checkMousePos;
+	const wchar_t* lblMode;
+	const wchar_t* lblCols;
+	const wchar_t* checkNamesBelow;
+	const wchar_t* checkNamesRight;
+	const wchar_t* lblSort;
+	const wchar_t* checkAddSeparator;
+	const wchar_t* lblSubIcon;
+	const wchar_t* lblSubCols;
+	const wchar_t* lblSubLayout;
+	const wchar_t* btnSave;
+	const wchar_t* btnCreateMenu;
+	const wchar_t* btnDeleteMenu;
+	const wchar_t* btnClose;
+	const wchar_t* themeSystem;
+	const wchar_t* themeLight;
+	const wchar_t* themeDark;
+	const wchar_t* modeList;
+	const wchar_t* modeIconGrid;
+	const wchar_t* modeDoubleCol;
+	const wchar_t* modeDoubleRow;
+	const wchar_t* modeSingleSub;
+	const wchar_t* sortAlpha;
+	const wchar_t* sortFoldersFirst;
+	const wchar_t* sublayoutIconOnly;
+	const wchar_t* sublayoutNameRight;
+	const wchar_t* sublayoutNameBelow;
+	const wchar_t* msgTitle;
+	const wchar_t* msgShortcutCreateFailed;
+	const wchar_t* msgShortcutCreated;
+	const wchar_t* msgSelectRootToCreate;
+	const wchar_t* msgSelectRootToDelete;
+	const wchar_t* msgNoShortcutForMenu;
+	const wchar_t* msgConfirmDeleteMenu;
+	const wchar_t* msgMenuDeleted;
+};
+
+const ConfigUIStrings& GetConfigUIStrings() {
+	static const ConfigUIStrings table[] = {
+		{ L"en",
+			L"Stacky-Plus Configuration",
+			L"Select a menu on the left.",
+			L"MENU NAME", L"MENU ICON", L"Change icon...",
+			L"Use small icons (mini)",
+			L"MENU COLOR",
+			L"MENU POSITION", L"Open next to the mouse cursor",
+			L"MENU MODE",
+			L"GRID COLUMNS",
+			L"Show names below icons", L"Show names to the right of icons",
+			L"ORDER",
+			L"Add separator between submenus and simple shortcuts",
+			L"SUBMENU ICON", L"COLUMNS (SINGLE SUBMENU)", L"SUBMENU LAYOUT",
+			L"Save", L"Create menu", L"Delete menu", L"Close",
+			L"System", L"Light", L"Dark",
+			L"List with submenus", L"Icon grid", L"Double column", L"Double row", L"Single submenu",
+			L"Alphabetical", L"Folders first",
+			L"Icon only", L"Name to the right", L"Name below",
+			L"Stacky",
+			L"Could not create the menu shortcut.",
+			L"Menu shortcut created successfully.",
+			L"Select a root folder to create its menu.",
+			L"Select a root folder whose menu you want to delete.",
+			L"This menu has no shortcut created.",
+			L"Delete this menu's shortcut? Its cache and saved configuration for this folder and its subfolders will also be deleted.",
+			L"Menu deleted successfully."
+		},
+		{ L"es",
+			L"Configuración de Stacky-Plus",
+			L"Seleccione un menú a la izquierda.",
+			L"NOMBRE DEL MENÚ", L"ÍCONO DEL MENÚ", L"Cambiar icono...",
+			L"Usar iconos pequeños (mini)",
+			L"COLOR DEL MENÚ",
+			L"POSICIÓN DEL MENÚ", L"Abrir junto al cursor del mouse",
+			L"MODO DE MENÚ",
+			L"COLUMNAS DE LA CUADRÍCULA",
+			L"Mostrar nombres debajo de los iconos", L"Mostrar nombres a la derecha de los iconos",
+			L"ORDEN",
+			L"Agregar separador de submenús y accesos directos simples",
+			L"ÍCONO DEL SUBMENÚ", L"COLUMNAS (SUBMENÚ ÚNICO)", L"DISPOSICIÓN DEL SUBMENÚ",
+			L"Guardar", L"Crear menú", L"Eliminar menú", L"Cerrar",
+			L"Sistema", L"Claro", L"Oscuro",
+			L"Lista con submenús", L"Cuadrícula de iconos", L"Doble columna", L"Doble fila", L"Submenú único",
+			L"Alfabético", L"Carpetas primero",
+			L"Solo icono", L"Nombre a la derecha", L"Nombre debajo",
+			L"Stacky",
+			L"No se pudo crear el acceso directo del menú.",
+			L"Acceso directo del menú creado correctamente.",
+			L"Seleccione una carpeta raíz para crear su menú.",
+			L"Seleccione una carpeta raíz cuyo menú desee eliminar.",
+			L"Este menú no tiene un acceso directo creado.",
+			L"¿Eliminar el acceso directo de este menú? También se borrarán su cache y la configuración guardada para esta carpeta y sus subcarpetas.",
+			L"Menú eliminado correctamente."
+		},
+		{ L"pt",
+			L"Configuração do Stacky-Plus",
+			L"Selecione um menu à esquerda.",
+			L"NOME DO MENU", L"ÍCONE DO MENU", L"Alterar ícone...",
+			L"Usar ícones pequenos (mini)",
+			L"COR DO MENU",
+			L"POSIÇÃO DO MENU", L"Abrir ao lado do cursor do mouse",
+			L"MODO DO MENU",
+			L"COLUNAS DA GRADE",
+			L"Mostrar nomes abaixo dos ícones", L"Mostrar nomes à direita dos ícones",
+			L"ORDEM",
+			L"Adicionar separador entre submenus e atalhos simples",
+			L"ÍCONE DO SUBMENU", L"COLUNAS (SUBMENU ÚNICO)", L"DISPOSIÇÃO DO SUBMENU",
+			L"Salvar", L"Criar menu", L"Excluir menu", L"Fechar",
+			L"Sistema", L"Claro", L"Escuro",
+			L"Lista com submenus", L"Grade de ícones", L"Coluna dupla", L"Linha dupla", L"Submenu único",
+			L"Alfabético", L"Pastas primeiro",
+			L"Somente ícone", L"Nome à direita", L"Nome abaixo",
+			L"Stacky",
+			L"Não foi possível criar o atalho do menu.",
+			L"Atalho do menu criado com sucesso.",
+			L"Selecione uma pasta raiz para criar seu menu.",
+			L"Selecione uma pasta raiz cujo menu deseja excluir.",
+			L"Este menu não possui um atalho criado.",
+			L"Excluir o atalho deste menu? O cache e a configuração salva desta pasta e de suas subpastas também serão excluídos.",
+			L"Menu excluído com sucesso."
+		},
+		{ L"fr",
+			L"Configuration de Stacky-Plus",
+			L"Sélectionnez un menu à gauche.",
+			L"NOM DU MENU", L"ICÔNE DU MENU", L"Changer l'icône...",
+			L"Utiliser de petites icônes (mini)",
+			L"COULEUR DU MENU",
+			L"POSITION DU MENU", L"Ouvrir près du curseur de la souris",
+			L"MODE DU MENU",
+			L"COLONNES DE LA GRILLE",
+			L"Afficher les noms sous les icônes", L"Afficher les noms à droite des icônes",
+			L"ORDRE",
+			L"Ajouter un séparateur entre les sous-menus et les raccourcis simples",
+			L"ICÔNE DU SOUS-MENU", L"COLONNES (SOUS-MENU UNIQUE)", L"DISPOSITION DU SOUS-MENU",
+			L"Enregistrer", L"Créer le menu", L"Supprimer le menu", L"Fermer",
+			L"Système", L"Clair", L"Sombre",
+			L"Liste avec sous-menus", L"Grille d'icônes", L"Double colonne", L"Double ligne", L"Sous-menu unique",
+			L"Alphabétique", L"Dossiers en premier",
+			L"Icône seule", L"Nom à droite", L"Nom en dessous",
+			L"Stacky",
+			L"Impossible de créer le raccourci du menu.",
+			L"Raccourci du menu créé avec succès.",
+			L"Sélectionnez un dossier racine pour créer son menu.",
+			L"Sélectionnez un dossier racine dont vous souhaitez supprimer le menu.",
+			L"Ce menu n'a pas de raccourci créé.",
+			L"Supprimer le raccourci de ce menu ? Son cache et la configuration enregistrée pour ce dossier et ses sous-dossiers seront également supprimés.",
+			L"Menu supprimé avec succès."
+		},
+		{ L"de",
+			L"Stacky-Plus-Konfiguration",
+			L"Wählen Sie links ein Menü aus.",
+			L"MENÜNAME", L"MENÜSYMBOL", L"Symbol ändern...",
+			L"Kleine Symbole verwenden (Mini)",
+			L"MENÜFARBE",
+			L"MENÜPOSITION", L"Neben dem Mauszeiger öffnen",
+			L"MENÜMODUS",
+			L"RASTERSPALTEN",
+			L"Namen unter den Symbolen anzeigen", L"Namen rechts neben den Symbolen anzeigen",
+			L"REIHENFOLGE",
+			L"Trennlinie zwischen Untermenüs und einfachen Verknüpfungen hinzufügen",
+			L"UNTERMENÜSYMBOL", L"SPALTEN (EINZELNES UNTERMENÜ)", L"UNTERMENÜLAYOUT",
+			L"Speichern", L"Menü erstellen", L"Menü löschen", L"Schließen",
+			L"System", L"Hell", L"Dunkel",
+			L"Liste mit Untermenüs", L"Symbolraster", L"Doppelspalte", L"Doppelzeile", L"Einzelnes Untermenü",
+			L"Alphabetisch", L"Ordner zuerst",
+			L"Nur Symbol", L"Name rechts", L"Name unten",
+			L"Stacky",
+			L"Die Menüverknüpfung konnte nicht erstellt werden.",
+			L"Menüverknüpfung erfolgreich erstellt.",
+			L"Wählen Sie einen Stammordner aus, um sein Menü zu erstellen.",
+			L"Wählen Sie einen Stammordner aus, dessen Menü Sie löschen möchten.",
+			L"Für dieses Menü wurde keine Verknüpfung erstellt.",
+			L"Verknüpfung dieses Menüs löschen? Der Cache und die gespeicherte Konfiguration für diesen Ordner und seine Unterordner werden ebenfalls gelöscht.",
+			L"Menü erfolgreich gelöscht."
+		},
+		{ L"it",
+			L"Configurazione di Stacky-Plus",
+			L"Seleziona un menu a sinistra.",
+			L"NOME DEL MENU", L"ICONA DEL MENU", L"Cambia icona...",
+			L"Usa icone piccole (mini)",
+			L"COLORE DEL MENU",
+			L"POSIZIONE DEL MENU", L"Apri accanto al cursore del mouse",
+			L"MODALITÀ MENU",
+			L"COLONNE DELLA GRIGLIA",
+			L"Mostra i nomi sotto le icone", L"Mostra i nomi a destra delle icone",
+			L"ORDINE",
+			L"Aggiungi separatore tra sottomenu e collegamenti semplici",
+			L"ICONA DEL SOTTOMENU", L"COLONNE (SOTTOMENU UNICO)", L"LAYOUT DEL SOTTOMENU",
+			L"Salva", L"Crea menu", L"Elimina menu", L"Chiudi",
+			L"Sistema", L"Chiaro", L"Scuro",
+			L"Elenco con sottomenu", L"Griglia di icone", L"Doppia colonna", L"Doppia riga", L"Sottomenu unico",
+			L"Alfabetico", L"Cartelle prima",
+			L"Solo icona", L"Nome a destra", L"Nome sotto",
+			L"Stacky",
+			L"Impossibile creare il collegamento del menu.",
+			L"Collegamento del menu creato correttamente.",
+			L"Seleziona una cartella radice per creare il suo menu.",
+			L"Seleziona una cartella radice di cui vuoi eliminare il menu.",
+			L"Questo menu non ha un collegamento creato.",
+			L"Eliminare il collegamento di questo menu? Verranno eliminati anche la cache e la configurazione salvata per questa cartella e le sue sottocartelle.",
+			L"Menu eliminato correttamente."
+		},
+		{ L"pl",
+			L"Konfiguracja Stacky-Plus",
+			L"Wybierz menu po lewej stronie.",
+			L"NAZWA MENU", L"IKONA MENU", L"Zmień ikonę...",
+			L"Użyj małych ikon (mini)",
+			L"KOLOR MENU",
+			L"POZYCJA MENU", L"Otwórz obok kursora myszy",
+			L"TRYB MENU",
+			L"KOLUMNY SIATKI",
+			L"Pokaż nazwy pod ikonami", L"Pokaż nazwy po prawej stronie ikon",
+			L"KOLEJNOŚĆ",
+			L"Dodaj separator między podmenu a zwykłymi skrótami",
+			L"IKONA PODMENU", L"KOLUMNY (POJEDYNCZE PODMENU)", L"UKŁAD PODMENU",
+			L"Zapisz", L"Utwórz menu", L"Usuń menu", L"Zamknij",
+			L"System", L"Jasny", L"Ciemny",
+			L"Lista z podmenu", L"Siatka ikon", L"Podwójna kolumna", L"Podwójny wiersz", L"Pojedyncze podmenu",
+			L"Alfabetycznie", L"Najpierw foldery",
+			L"Tylko ikona", L"Nazwa po prawej", L"Nazwa poniżej",
+			L"Stacky",
+			L"Nie udało się utworzyć skrótu menu.",
+			L"Skrót menu został utworzony pomyślnie.",
+			L"Wybierz folder główny, aby utworzyć jego menu.",
+			L"Wybierz folder główny, którego menu chcesz usunąć.",
+			L"To menu nie ma utworzonego skrótu.",
+			L"Usunąć skrót tego menu? Pamięć podręczna i zapisana konfiguracja dla tego folderu i jego podfolderów również zostaną usunięte.",
+			L"Menu zostało pomyślnie usunięte."
+		},
+		{ L"ru",
+			L"Настройка Stacky-Plus",
+			L"Выберите меню слева.",
+			L"ИМЯ МЕНЮ", L"ЗНАЧОК МЕНЮ", L"Изменить значок...",
+			L"Использовать маленькие значки (мини)",
+			L"ЦВЕТ МЕНЮ",
+			L"ПОЛОЖЕНИЕ МЕНЮ", L"Открывать рядом с курсором мыши",
+			L"РЕЖИМ МЕНЮ",
+			L"СТОЛБЦЫ СЕТКИ",
+			L"Показывать имена под значками", L"Показывать имена справа от значков",
+			L"ПОРЯДОК",
+			L"Добавить разделитель между подменю и простыми ярлыками",
+			L"ЗНАЧОК ПОДМЕНЮ", L"СТОЛБЦЫ (ОДНО ПОДМЕНЮ)", L"МАКЕТ ПОДМЕНЮ",
+			L"Сохранить", L"Создать меню", L"Удалить меню", L"Закрыть",
+			L"Системная", L"Светлая", L"Тёмная",
+			L"Список с подменю", L"Сетка значков", L"Двойной столбец", L"Двойная строка", L"Единое подменю",
+			L"По алфавиту", L"Сначала папки",
+			L"Только значок", L"Имя справа", L"Имя снизу",
+			L"Stacky",
+			L"Не удалось создать ярлык меню.",
+			L"Ярлык меню успешно создан.",
+			L"Выберите корневую папку, чтобы создать её меню.",
+			L"Выберите корневую папку, меню которой нужно удалить.",
+			L"Для этого меню не создан ярлык.",
+			L"Удалить ярлык этого меню? Кэш и сохранённая конфигурация для этой папки и её подпапок также будут удалены.",
+			L"Меню успешно удалено."
+		},
+		{ L"zh",
+			L"Stacky-Plus 配置",
+			L"请在左侧选择一个菜单。",
+			L"菜单名称", L"菜单图标", L"更改图标...",
+			L"使用小图标（迷你）",
+			L"菜单颜色",
+			L"菜单位置", L"在鼠标光标旁打开",
+			L"菜单模式",
+			L"网格列数",
+			L"在图标下方显示名称", L"在图标右侧显示名称",
+			L"顺序",
+			L"在子菜单和简单快捷方式之间添加分隔符",
+			L"子菜单图标", L"列数（单一子菜单）", L"子菜单布局",
+			L"保存", L"创建菜单", L"删除菜单", L"关闭",
+			L"系统", L"浅色", L"深色",
+			L"带子菜单的列表", L"图标网格", L"双列", L"双行", L"单一子菜单",
+			L"按字母顺序", L"文件夹优先",
+			L"仅图标", L"名称在右侧", L"名称在下方",
+			L"Stacky",
+			L"无法创建菜单快捷方式。",
+			L"菜单快捷方式创建成功。",
+			L"请选择一个根文件夹以创建其菜单。",
+			L"请选择要删除其菜单的根文件夹。",
+			L"此菜单尚未创建快捷方式。",
+			L"删除此菜单的快捷方式？此文件夹及其子文件夹的缓存和已保存配置也将被删除。",
+			L"菜单删除成功。"
+		},
+		{ L"ja",
+			L"Stacky-Plus の設定",
+			L"左側からメニューを選択してください。",
+			L"メニュー名", L"メニューアイコン", L"アイコンを変更...",
+			L"小さいアイコンを使用する（ミニ）",
+			L"メニューの色",
+			L"メニューの位置", L"マウスカーソルの隣に開く",
+			L"メニューモード",
+			L"グリッドの列数",
+			L"アイコンの下に名前を表示", L"アイコンの右に名前を表示",
+			L"並び順",
+			L"サブメニューと単純なショートカットの間に区切り線を追加",
+			L"サブメニューアイコン", L"列数（単一サブメニュー）", L"サブメニューのレイアウト",
+			L"保存", L"メニューを作成", L"メニューを削除", L"閉じる",
+			L"システム", L"ライト", L"ダーク",
+			L"サブメニュー付きリスト", L"アイコングリッド", L"二重列", L"二重行", L"単一サブメニュー",
+			L"アルファベット順", L"フォルダーを先に",
+			L"アイコンのみ", L"名前を右に", L"名前を下に",
+			L"Stacky",
+			L"メニューのショートカットを作成できませんでした。",
+			L"メニューのショートカットが正常に作成されました。",
+			L"メニューを作成するルートフォルダーを選択してください。",
+			L"メニューを削除するルートフォルダーを選択してください。",
+			L"このメニューにはショートカットが作成されていません。",
+			L"このメニューのショートカットを削除しますか？このフォルダーとサブフォルダーのキャッシュと保存された設定も削除されます。",
+			L"メニューが正常に削除されました。"
+		},
+	};
+	std::wstring code = GetUILanguageCode();
+	for (const auto& row : table) {
+		if (code == row.lang) return row;
+	}
+	return table[0]; // English fallback
+}
 
 // Reads the current Windows accent color (same source used by the main
 // popup/grid menus) so the TreeView selection/hover highlight matches it.
@@ -537,29 +881,31 @@ bool CreateShortcutForNode(HWND owner, const std::wstring& exeFolder, const Tree
 	}
 
 	if (!ok) {
-		::MessageBox(owner, L"No se pudo crear el acceso directo del menú.", L"Stacky", MB_OK | MB_ICONERROR);
+		const ConfigUIStrings& S = GetConfigUIStrings();
+		::MessageBox(owner, S.msgShortcutCreateFailed, S.msgTitle, MB_OK | MB_ICONERROR);
 	}
 	return ok;
 }
 
 // Fills theme/mode/sort/layout combo boxes with their fixed option sets.
 void PopulateCombos(ConfigWindowState* state) {
-	ComboBox_AddString(state->hwndComboTheme, L"Sistema");
-	ComboBox_AddString(state->hwndComboTheme, L"Claro");
-	ComboBox_AddString(state->hwndComboTheme, L"Oscuro");
+	const ConfigUIStrings& S = GetConfigUIStrings();
+	ComboBox_AddString(state->hwndComboTheme, S.themeSystem);
+	ComboBox_AddString(state->hwndComboTheme, S.themeLight);
+	ComboBox_AddString(state->hwndComboTheme, S.themeDark);
 
-	ComboBox_AddString(state->hwndComboMode, L"Lista con submenús");
-	ComboBox_AddString(state->hwndComboMode, L"Cuadrícula de iconos");
-	ComboBox_AddString(state->hwndComboMode, L"Doble columna");
-	ComboBox_AddString(state->hwndComboMode, L"Doble fila");
-	ComboBox_AddString(state->hwndComboMode, L"Submenú único");
+	ComboBox_AddString(state->hwndComboMode, S.modeList);
+	ComboBox_AddString(state->hwndComboMode, S.modeIconGrid);
+	ComboBox_AddString(state->hwndComboMode, S.modeDoubleCol);
+	ComboBox_AddString(state->hwndComboMode, S.modeDoubleRow);
+	ComboBox_AddString(state->hwndComboMode, S.modeSingleSub);
 
-	ComboBox_AddString(state->hwndComboSort, L"Alfabético");
-	ComboBox_AddString(state->hwndComboSort, L"Carpetas primero");
+	ComboBox_AddString(state->hwndComboSort, S.sortAlpha);
+	ComboBox_AddString(state->hwndComboSort, S.sortFoldersFirst);
 
-	ComboBox_AddString(state->hwndComboSubLayout, L"Solo icono");
-	ComboBox_AddString(state->hwndComboSubLayout, L"Nombre a la derecha");
-	ComboBox_AddString(state->hwndComboSubLayout, L"Nombre debajo");
+	ComboBox_AddString(state->hwndComboSubLayout, S.sublayoutIconOnly);
+	ComboBox_AddString(state->hwndComboSubLayout, S.sublayoutNameRight);
+	ComboBox_AddString(state->hwndComboSubLayout, S.sublayoutNameBelow);
 }
 
 // Creates every control used by the right-hand panel (both root and submenu
@@ -571,66 +917,68 @@ void CreateRightPanelControls(HWND hwnd, HINSTANCE hInst, ConfigWindowState* sta
 	const int rowH = 22;
 	const int gap = 30;
 
-	state->hwndLblName = CreateLabel(hwnd, hInst, L"NOMBRE DEL MENÚ", x, y, w, 18, IDC_LBL_NAME); y += 20;
+	const ConfigUIStrings& S = GetConfigUIStrings();
+
+	state->hwndLblName = CreateLabel(hwnd, hInst, S.lblName, x, y, w, 18, IDC_LBL_NAME); y += 20;
 	state->hwndEditName = ::CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
 		x, y, w, rowH, hwnd, (HMENU)IDC_EDIT_NAME, hInst, nullptr); y += gap;
 
-	state->hwndLblIcon = CreateLabel(hwnd, hInst, L"ÍCONO DEL MENÚ", x, y, w, 18, IDC_LBL_ICON); y += 20;
+	state->hwndLblIcon = CreateLabel(hwnd, hInst, S.lblIcon, x, y, w, 18, IDC_LBL_ICON); y += 20;
 	state->hwndEditIcon = ::CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
 		x, y, w - 122, rowH, hwnd, (HMENU)IDC_EDIT_ICON, hInst, nullptr);
 	state->hwndIconPreview = ::CreateWindowEx(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE,
 		x + w - 118, y - 1, rowH + 2, rowH + 2, hwnd, (HMENU)IDC_ICON_PREVIEW, hInst, nullptr);
-	state->hwndBtnBrowseIcon = ::CreateWindow(L"BUTTON", L"Cambiar icono...", WS_CHILD | WS_VISIBLE,
+	state->hwndBtnBrowseIcon = ::CreateWindow(L"BUTTON", S.btnChangeIcon, WS_CHILD | WS_VISIBLE,
 		x + w - 85, y, 85, rowH, hwnd, (HMENU)IDC_BTN_BROWSE_ICON, hInst, nullptr); y += gap;
 
-	state->hwndCheckMini = ::CreateWindow(L"BUTTON", L"Usar iconos pequeños (mini)", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+	state->hwndCheckMini = ::CreateWindow(L"BUTTON", S.checkMini, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
 		x, y, w, rowH, hwnd, (HMENU)IDC_CHECK_MINI, hInst, nullptr); y += gap;
 
-	state->hwndLblTheme = CreateLabel(hwnd, hInst, L"COLOR DEL MENÚ", x, y, w, 18, IDC_LBL_THEME); y += 20;
+	state->hwndLblTheme = CreateLabel(hwnd, hInst, S.lblTheme, x, y, w, 18, IDC_LBL_THEME); y += 20;
 	state->hwndComboTheme = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
 		x, y, w, 200, hwnd, (HMENU)IDC_COMBO_THEME, hInst, nullptr); y += gap;
 
-	state->hwndLblPosition = CreateLabel(hwnd, hInst, L"POSICIÓN DEL MENÚ", x, y, w, 18, IDC_LBL_POSITION); y += 20;
-	state->hwndCheckMousePos = ::CreateWindow(L"BUTTON", L"Abrir junto al cursor del mouse", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+	state->hwndLblPosition = CreateLabel(hwnd, hInst, S.lblPosition, x, y, w, 18, IDC_LBL_POSITION); y += 20;
+	state->hwndCheckMousePos = ::CreateWindow(L"BUTTON", S.checkMousePos, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
 		x, y, w, rowH, hwnd, (HMENU)IDC_CHECK_MOUSEPOS, hInst, nullptr); y += gap;
 
-	state->hwndLblMode = CreateLabel(hwnd, hInst, L"MODO DE MENÚ", x, y, w, 18, IDC_LBL_MODE); y += 20;
+	state->hwndLblMode = CreateLabel(hwnd, hInst, S.lblMode, x, y, w, 18, IDC_LBL_MODE); y += 20;
 	state->hwndComboMode = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
 		x, y, w, 200, hwnd, (HMENU)IDC_COMBO_MODE, hInst, nullptr); y += gap;
 
-	state->hwndLblCols = CreateLabel(hwnd, hInst, L"COLUMNAS DE LA CUADRÍCULA", x, y, w, 18, IDC_LBL_COLS); y += 20;
+	state->hwndLblCols = CreateLabel(hwnd, hInst, S.lblCols, x, y, w, 18, IDC_LBL_COLS); y += 20;
 	state->hwndEditCols = ::CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"3", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_NUMBER,
 		x, y, 60, rowH, hwnd, (HMENU)IDC_EDIT_COLS, hInst, nullptr); y += gap;
 
-	state->hwndCheckNamesBelow = ::CreateWindow(L"BUTTON", L"Mostrar nombres debajo de los iconos", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+	state->hwndCheckNamesBelow = ::CreateWindow(L"BUTTON", S.checkNamesBelow, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
 		x, y, w, rowH, hwnd, (HMENU)IDC_CHECK_NAMES_BELOW, hInst, nullptr); y += rowH + 4;
-	state->hwndCheckNamesRight = ::CreateWindow(L"BUTTON", L"Mostrar nombres a la derecha de los iconos", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+	state->hwndCheckNamesRight = ::CreateWindow(L"BUTTON", S.checkNamesRight, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
 		x, y, w, rowH, hwnd, (HMENU)IDC_CHECK_NAMES_RIGHT, hInst, nullptr); y += gap;
 
-	state->hwndLblSort = CreateLabel(hwnd, hInst, L"ORDEN", x, y, w, 18, IDC_LBL_SORT); y += 20;
+	state->hwndLblSort = CreateLabel(hwnd, hInst, S.lblSort, x, y, w, 18, IDC_LBL_SORT); y += 20;
 	state->hwndComboSort = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
 		x, y, w, 200, hwnd, (HMENU)IDC_COMBO_SORT, hInst, nullptr); y += gap;
 
 	state->hwndCheckAddSeparator = ::CreateWindow(L"BUTTON",
-		L"Agregar separador de submenús y accesos directos simples", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_MULTILINE,
+		S.checkAddSeparator, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_MULTILINE,
 		x, y, w, rowH * 2, hwnd, (HMENU)IDC_CHECK_ADD_SEPARATOR, hInst, nullptr); y += rowH * 2 + 8;
 
 	// Submenu-only controls (share the same vertical band as some root
 	// controls but are shown exclusively when a submenu node is selected).
 	int ySub = panelRc.top;
-	state->hwndLblSubIcon = CreateLabel(hwnd, hInst, L"ÍCONO DEL SUBMENÚ", x, ySub, w, 18, IDC_LBL_SUBICON); ySub += 20;
+	state->hwndLblSubIcon = CreateLabel(hwnd, hInst, S.lblSubIcon, x, ySub, w, 18, IDC_LBL_SUBICON); ySub += 20;
 	state->hwndEditSubIcon = ::CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
 		x, ySub, w - 122, rowH, hwnd, (HMENU)IDC_EDIT_SUBICON, hInst, nullptr);
 	state->hwndSubIconPreview = ::CreateWindowEx(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_ICON | SS_CENTERIMAGE,
 		x + w - 118, ySub - 1, rowH + 2, rowH + 2, hwnd, (HMENU)IDC_SUBICON_PREVIEW, hInst, nullptr);
-	state->hwndBtnBrowseSubIcon = ::CreateWindow(L"BUTTON", L"Cambiar icono...", WS_CHILD | WS_VISIBLE,
+	state->hwndBtnBrowseSubIcon = ::CreateWindow(L"BUTTON", S.btnChangeIcon, WS_CHILD | WS_VISIBLE,
 		x + w - 85, ySub, 85, rowH, hwnd, (HMENU)IDC_BTN_BROWSE_SUBICON, hInst, nullptr); ySub += gap;
 
-	state->hwndLblSubCols = CreateLabel(hwnd, hInst, L"COLUMNAS (SUBMENÚ ÚNICO)", x, ySub, w, 18, IDC_LBL_SUBCOLS); ySub += 20;
+	state->hwndLblSubCols = CreateLabel(hwnd, hInst, S.lblSubCols, x, ySub, w, 18, IDC_LBL_SUBCOLS); ySub += 20;
 	state->hwndEditSubCols = ::CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"3", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_NUMBER,
 		x, ySub, 60, rowH, hwnd, (HMENU)IDC_EDIT_SUBCOLS, hInst, nullptr); ySub += gap;
 
-	state->hwndLblSubLayout = CreateLabel(hwnd, hInst, L"DISPOSICIÓN DEL SUBMENÚ", x, ySub, w, 18, IDC_LBL_SUBLAYOUT); ySub += 20;
+	state->hwndLblSubLayout = CreateLabel(hwnd, hInst, S.lblSubLayout, x, ySub, w, 18, IDC_LBL_SUBLAYOUT); ySub += 20;
 	state->hwndComboSubLayout = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
 		x, ySub, w, 200, hwnd, (HMENU)IDC_COMBO_SUBLAYOUT, hInst, nullptr); ySub += gap;
 
@@ -1188,7 +1536,9 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 			10, 10, 220, rc.bottom - 100, hwnd, (HMENU)IDC_TREE, ::GetModuleHandle(nullptr), nullptr);
 		state->accentColor = ReadAccentColor();
 
-		state->hwndRightPanel = ::CreateWindowEx(0, L"STATIC", L"Seleccione un menú a la izquierda.",
+		const ConfigUIStrings& S = GetConfigUIStrings();
+
+		state->hwndRightPanel = ::CreateWindowEx(0, L"STATIC", S.selectMenuOnLeft,
 			WS_CHILD | WS_VISIBLE | SS_LEFT,
 			240, 10, rc.right - 250, rc.bottom - 100, hwnd, nullptr, ::GetModuleHandle(nullptr), nullptr);
 
@@ -1197,13 +1547,13 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 		HideAllPanelControls(state);
 		::ShowWindow(state->hwndRightPanel, SW_SHOW);
 
-		state->hwndBtnSave = ::CreateWindow(L"BUTTON", L"Guardar",
+		state->hwndBtnSave = ::CreateWindow(L"BUTTON", S.btnSave,
 			WS_CHILD | WS_VISIBLE, 10, rc.bottom - 40, 100, 28, hwnd, (HMENU)IDC_BTN_SAVE, ::GetModuleHandle(nullptr), nullptr);
-		state->hwndBtnCreate = ::CreateWindow(L"BUTTON", L"Crear menú",
+		state->hwndBtnCreate = ::CreateWindow(L"BUTTON", S.btnCreateMenu,
 			WS_CHILD | WS_VISIBLE, 120, rc.bottom - 40, 120, 28, hwnd, (HMENU)IDC_BTN_CREATE, ::GetModuleHandle(nullptr), nullptr);
-		state->hwndBtnDelete = ::CreateWindow(L"BUTTON", L"Eliminar menú",
+		state->hwndBtnDelete = ::CreateWindow(L"BUTTON", S.btnDeleteMenu,
 			WS_CHILD | WS_VISIBLE, 250, rc.bottom - 40, 120, 28, hwnd, (HMENU)IDC_BTN_DELETE, ::GetModuleHandle(nullptr), nullptr);
-		state->hwndBtnCancel = ::CreateWindow(L"BUTTON", L"Cerrar",
+		state->hwndBtnCancel = ::CreateWindow(L"BUTTON", S.btnClose,
 			WS_CHILD | WS_VISIBLE, 380, rc.bottom - 40, 100, 28, hwnd, (HMENU)IDC_BTN_CANCEL, ::GetModuleHandle(nullptr), nullptr);
 
 		PopulateTreeFolder(state->hwndTree, TVI_ROOT, state->exeFolder, state->nodes, true, -1);
@@ -1352,39 +1702,42 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 		case IDC_BTN_SAVE:
 			SaveSelectedNodeConfig(state);
 			return 0;
-		case IDC_BTN_CREATE:
+		case IDC_BTN_CREATE: {
+			const ConfigUIStrings& S = GetConfigUIStrings();
 			SaveSelectedNodeConfig(state);
 			if (state->selectedNode >= 0 && state->selectedNode < (int)state->nodes.size() &&
 				state->nodes[state->selectedNode].isRoot) {
 				if (CreateShortcutForNode(hwnd, state->exeFolder, state->nodes[state->selectedNode])) {
-					::MessageBox(hwnd, L"Acceso directo del menú creado correctamente.", L"Stacky", MB_OK | MB_ICONINFORMATION);
+					::MessageBox(hwnd, S.msgShortcutCreated, S.msgTitle, MB_OK | MB_ICONINFORMATION);
 					RefreshShortcutIndicators(state);
 				}
 			} else {
-				::MessageBox(hwnd, L"Seleccione una carpeta raíz para crear su menú.", L"Stacky", MB_OK | MB_ICONWARNING);
+				::MessageBox(hwnd, S.msgSelectRootToCreate, S.msgTitle, MB_OK | MB_ICONWARNING);
 			}
 			return 0;
+		}
 		case IDC_BTN_DELETE: {
+			const ConfigUIStrings& S = GetConfigUIStrings();
 			if (state->selectedNode < 0 || state->selectedNode >= (int)state->nodes.size() ||
 				!state->nodes[state->selectedNode].isRoot) {
-				::MessageBox(hwnd, L"Seleccione una carpeta raíz cuyo menú desee eliminar.", L"Stacky", MB_OK | MB_ICONWARNING);
+				::MessageBox(hwnd, S.msgSelectRootToDelete, S.msgTitle, MB_OK | MB_ICONWARNING);
 				return 0;
 			}
 			int rootIdx = state->selectedNode;
 			std::wstring lnkPath = FindShortcutForFolder(state->exeFolder, state->nodes[rootIdx].fullPath);
 			if (lnkPath.empty()) {
-				::MessageBox(hwnd, L"Este menú no tiene un acceso directo creado.", L"Stacky", MB_OK | MB_ICONWARNING);
+				::MessageBox(hwnd, S.msgNoShortcutForMenu, S.msgTitle, MB_OK | MB_ICONWARNING);
 				return 0;
 			}
 			int answer = ::MessageBox(hwnd,
-				L"¿Eliminar el acceso directo de este menú? También se borrarán su cache y la configuración guardada para esta carpeta y sus subcarpetas.",
-				L"Stacky", MB_YESNO | MB_ICONQUESTION);
+				S.msgConfirmDeleteMenu,
+				S.msgTitle, MB_YESNO | MB_ICONQUESTION);
 			if (answer == IDYES) {
 				::SetFileAttributes(lnkPath.c_str(), FILE_ATTRIBUTE_NORMAL);
 				::DeleteFile(lnkPath.c_str());
 				DeleteMenuArtifactsForFolder(state, rootIdx);
 				RefreshShortcutIndicators(state);
-				::MessageBox(hwnd, L"Menú eliminado correctamente.", L"Stacky", MB_OK | MB_ICONINFORMATION);
+				::MessageBox(hwnd, S.msgMenuDeleted, S.msgTitle, MB_OK | MB_ICONINFORMATION);
 			}
 			return 0;
 		}
@@ -1495,7 +1848,7 @@ int RunStackyConfigWindow(HINSTANCE hInstance) {
 	if (posX < 0) posX = 0;
 	if (posY < 0) posY = 0;
 
-	HWND hwnd = ::CreateWindowEx(0, kConfigWndClass, kConfigWndTitle,
+	HWND hwnd = ::CreateWindowEx(0, kConfigWndClass, GetConfigUIStrings().windowTitle,
 		WS_OVERLAPPEDWINDOW,
 		posX, posY, winW, winH,
 		nullptr, nullptr, hInstance, nullptr);
