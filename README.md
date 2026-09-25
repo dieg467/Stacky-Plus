@@ -80,7 +80,7 @@ If you select this option in the Settings window, the menu will display submenus
 If you want to customize the order of the items, the first item must begin with the prefix %01%, followed by its name. There is no need to leave a space between %01% and the item name. The %01% prefix will not be displayed in the menu. <br>
 Subsequent items will be named %02%, %03%, etc. If an item does not have a prefix, it will be sorted alphabetically. <br>
 
-<img width="752" height="423" alt="06a- Ordenamiento" src="https://github.com/user-attachments/assets/02dfcbc5-fb3a-43a5-b2b1-dea9af488771" />
+<img width="752" height="423" alt="11- Ordenamiento" src="https://github.com/user-attachments/assets/3041343b-06a5-4d8b-b06e-0b2b98f762a2" />
 
 ## Other options
 ### Small icons<br>
