@@ -48,7 +48,7 @@ Inside the STACKY PLUS folder, create a **folder** to hold shortcuts. For exampl
 <img width="655" height="304" alt="06-Crear carpeta Multimedia" src="https://github.com/user-attachments/assets/765f88d9-9259-452e-8482-3242e7c10968" /><br>
 
 This folder will later become a menu in the taskbar. If you create several folders, such as "Multimedia", "Documents", "System", etc., each one will become a separate menu in the taskbar, each with its own button. <br>
-Only folders located in the same directory (containing folder) as stacky-plus.exe can be converted into a menu. <br>
+Only folders located in the same directory as stacky-plus.exe can be converted into a menu. <br>
 If you want a menu to have **submenus**, you must create subfolders within the "Multimedia," "Documents," etc., folders. You can create multiple levels of submenus by creating subfolders within subfolders. <br>
 In the folder or subfolder where you want to create a **separator** (horizontal dividing line), create a .txt text file, give it a name, and change the .txt extension to the following:<br>
 
