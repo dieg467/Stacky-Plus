@@ -63,7 +63,7 @@ Double-click the Stacky-plus.exe file. A CONFIGURATION window with two panels wi
 
 <img width="746" height="613" alt="10 CONFIGURACION" src="https://github.com/user-attachments/assets/5b050c31-a1b8-411c-8f3c-4397be8c4f61" />
 
-From there, you can select the menu name, its icon, whether to use small icons within the menu, the menu color, the opening position, the menu mode, the item order, and so on. <br>
+In the right panel you can select the menu name, its icon, whether to use small icons within the menu, the menu color, the opening position, the menu mode, the item order, and so on. <br>
 Once you have selected all the menu settings, click "Create menu". A shortcut bearing the assigned menu name will then be created in the "Stacky plus" containing folder. Double-clicking the shortcut opens the created menu.<br>
 
 <img width="677" height="522" alt="08-Menú·abre·en·carpeta" src="https://github.com/user-attachments/assets/eb7a90c2-1266-4189-971b-f386bd9aa9ce" /><br>
@@ -73,7 +73,7 @@ Dragging that shortcut to the taskbar creates the menu button.<br>
 
 ## **Arrangement of elements**
 - **Predetermined**<br>
-By default, items (folder, subfolder, shortcut, separator) are sorted alphabetically, and will be sorted accordingly in the corresponding menu or submenu. <br>
+By default, items (folder, subfolder, shortcut, separator) are sorted alphabetically.<br>
 - **Folders first**<br>
 If you select this option in the Settings window, the menu will display submenus first, followed by direct links. You can choose to separate these groups using an automatic separator. <br>
 - **Personalized** <br>
@@ -87,7 +87,7 @@ Subsequent items will be named %02%, %03%, etc. If an item does not have a prefi
 You can select the small icon (mini) mode in the settings.<br>
 - If this option is selected in the main menu, it will apply to all submenus.<br>
 - If this option is selected in a submenu, it will apply to that submenu and its child submenus.<br>
-<img width="414" height="305" alt="08 Mini" src="https://github.com/user-attachments/assets/a614336a-b13a-42f6-b773-d210b9d1a883" /><br>
+<img width="414" height="305" alt="12 Mini" src="https://github.com/user-attachments/assets/f901802a-a27d-4902-8c10-3a6dc1766a06" /><br>
 ### **Color modes**<br>
 There are three color modes: system (default), light, and dark.<br>
 ### **Menu at pointer position**<br>
