@@ -91,7 +91,7 @@ You can select the small icon (mini) mode in the settings.<br>
 ### **Color modes**<br>
 There are three color modes: system (default), light, and dark.<br>
 ### **Menu at pointer position**<br>
-Selecting this option in the main menu causes the menu to open at the mouse position, provided you have configured a keyboard shortcut.<br>
+When this option is selected in the Settings window, the menu opens at the mouse position when using the system's default keys (Windows + 1, Windows + 2, etc., depending on the menu's location on the taskbar).<br>
   
 ## Shortcuts to Web Pages
 By default, website shortcuts appear with the browser icon (Chrome, Edge, Firefox, etc.). Once a website shortcut is in a menu, access the site via that shortcut so that Stacky-plus captures the website's icon (favicon) and adds it to the menu. Most icons are supported. <br>
@@ -101,11 +101,11 @@ By default, website shortcuts appear with the browser icon (Chrome, Edge, Firefo
 If Stacky-plus did not capture the icon/favicon, it can be customized via the corresponding shortcut. <br>
 
 ## Context menu
-Right-clicking an item (shortcut or submenu) displays a context menu with options.
+Right-clicking an item (shortcut or submenu) displays a context menu with options.<br>
+<img width="293" height="254" alt="14 Menú contextual" src="https://github.com/user-attachments/assets/1a7f272f-0ed9-4945-b5ed-4bd4b2b495ee" />
 
 ## Menu modifications
 All modifications to a menu or submenu can be made from the Configuration window, either before or after it has been created. Changes are saved immediately when you switch folders or subfolders in the left panel, or whenever you press the Save button.
 
 ## Original Source
-This project is based on Pawel Turlejski's original project (https://github.com/pawelt/stacky), which is no longer maintained, and
-Clau-Bucur's fork (https://github.com/clau-bucur/stacky)
+This project is based on the original project by Pawel Turlejski (https://github.com/pawelt/stacky)—which is no longer maintained—and on the fork by Clau-Bucur (https://github.com/clau-bucur/stacky). Modifications and new features have been implemented using artificial intelligence.
