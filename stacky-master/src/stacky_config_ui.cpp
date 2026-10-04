@@ -23,7 +23,9 @@
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "Gdiplus.lib")
 #include <dwmapi.h>
+#include <gdiplus.h>
 
 // Opt into Common Controls version 6 (the "themed"/modern look used by
 // Windows Explorer and other native Windows 10/11 dialogs) via a linker
@@ -84,11 +86,21 @@ struct ConfigUIStrings {
 	const wchar_t* themeSystem;
 	const wchar_t* themeLight;
 	const wchar_t* themeDark;
+	const wchar_t* themeSkyBlue;
+	const wchar_t* themeGreen;
+	const wchar_t* themeOrange;
+	const wchar_t* themeViolet;
+	const wchar_t* themePink;
+	const wchar_t* themeRed;
+	const wchar_t* themeYellow;
+	const wchar_t* themeBrown;
+	const wchar_t* themeBlue;
 	const wchar_t* modeList;
 	const wchar_t* modeIconGrid;
 	const wchar_t* modeDoubleCol;
 	const wchar_t* modeDoubleRow;
 	const wchar_t* modeSingleSub;
+	const wchar_t* modeSplitGrid;
 	const wchar_t* sortAlpha;
 	const wchar_t* sortFoldersFirst;
 	const wchar_t* sublayoutIconOnly;
@@ -120,8 +132,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Add separator between submenus and simple shortcuts",
 			L"SUBMENU ICON", L"COLUMNS (SINGLE SUBMENU)", L"SUBMENU LAYOUT",
 			L"Save", L"Create menu", L"Delete menu", L"Close",
-			L"System", L"Light", L"Dark",
-			L"List with submenus", L"Icon grid", L"Double column", L"Double row", L"Single submenu",
+			L"System", L"Gray", L"Black",
+			L"Sky Blue", L"Green", L"Orange", L"Violet", L"Pink", L"Red", L"Yellow", L"Brown", L"Blue",
+			L"List with submenus", L"Icon grid", L"Double column", L"Double row", L"Single submenu", L"Split icon grid",
 			L"Alphabetical", L"Folders first",
 			L"Icon only", L"Name to the right", L"Name below",
 			L"Stacky",
@@ -147,8 +160,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Agregar separador de submenús y accesos directos simples",
 			L"ÍCONO DEL SUBMENÚ", L"COLUMNAS (SUBMENÚ ÚNICO)", L"DISPOSICIÓN DEL SUBMENÚ",
 			L"Guardar", L"Crear menú", L"Eliminar menú", L"Cerrar",
-			L"Sistema", L"Claro", L"Oscuro",
-			L"Lista con submenús", L"Cuadrícula de iconos", L"Doble columna", L"Doble fila", L"Submenú único",
+			L"Sistema", L"Gris", L"Negro",
+			L"Celeste", L"Verde", L"Naranja", L"Violeta", L"Rosa", L"Rojo", L"Amarillo", L"Marrón", L"Azul",
+			L"Lista con submenús", L"Cuadrícula de iconos", L"Doble columna", L"Doble fila", L"Submenú único", L"Cuadrícula dividida de íconos",
 			L"Alfabético", L"Carpetas primero",
 			L"Solo icono", L"Nombre a la derecha", L"Nombre debajo",
 			L"Stacky",
@@ -174,8 +188,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Adicionar separador entre submenus e atalhos simples",
 			L"ÍCONE DO SUBMENU", L"COLUNAS (SUBMENU ÚNICO)", L"DISPOSIÇÃO DO SUBMENU",
 			L"Salvar", L"Criar menu", L"Excluir menu", L"Fechar",
-			L"Sistema", L"Claro", L"Escuro",
-			L"Lista com submenus", L"Grade de ícones", L"Coluna dupla", L"Linha dupla", L"Submenu único",
+			L"Sistema", L"Cinza", L"Preto",
+			L"Azul claro", L"Verde", L"Laranja", L"Violeta", L"Rosa", L"Vermelho", L"Amarelo", L"Marrom", L"Azul",
+			L"Lista com submenus", L"Grade de ícones", L"Coluna dupla", L"Linha dupla", L"Submenu único", L"Grade dividida de ícones",
 			L"Alfabético", L"Pastas primeiro",
 			L"Somente ícone", L"Nome à direita", L"Nome abaixo",
 			L"Stacky",
@@ -201,8 +216,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Ajouter un séparateur entre les sous-menus et les raccourcis simples",
 			L"ICÔNE DU SOUS-MENU", L"COLONNES (SOUS-MENU UNIQUE)", L"DISPOSITION DU SOUS-MENU",
 			L"Enregistrer", L"Créer le menu", L"Supprimer le menu", L"Fermer",
-			L"Système", L"Clair", L"Sombre",
-			L"Liste avec sous-menus", L"Grille d'icônes", L"Double colonne", L"Double ligne", L"Sous-menu unique",
+			L"Système", L"Gris", L"Noir",
+			L"Bleu ciel", L"Vert", L"Orange", L"Violet", L"Rose", L"Rouge", L"Jaune", L"Marron", L"Bleu",
+			L"Liste avec sous-menus", L"Grille d'icônes", L"Double colonne", L"Double ligne", L"Sous-menu unique", L"Grille d'icônes divisée",
 			L"Alphabétique", L"Dossiers en premier",
 			L"Icône seule", L"Nom à droite", L"Nom en dessous",
 			L"Stacky",
@@ -228,8 +244,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Trennlinie zwischen Untermenüs und einfachen Verknüpfungen hinzufügen",
 			L"UNTERMENÜSYMBOL", L"SPALTEN (EINZELNES UNTERMENÜ)", L"UNTERMENÜLAYOUT",
 			L"Speichern", L"Menü erstellen", L"Menü löschen", L"Schließen",
-			L"System", L"Hell", L"Dunkel",
-			L"Liste mit Untermenüs", L"Symbolraster", L"Doppelspalte", L"Doppelzeile", L"Einzelnes Untermenü",
+			L"System", L"Grau", L"Schwarz",
+			L"Himmelblau", L"Grün", L"Orange", L"Violett", L"Rosa", L"Rot", L"Gelb", L"Braun", L"Blau",
+			L"Liste mit Untermenüs", L"Symbolraster", L"Doppelspalte", L"Doppelzeile", L"Einzelnes Untermenü", L"Geteiltes Symbolraster",
 			L"Alphabetisch", L"Ordner zuerst",
 			L"Nur Symbol", L"Name rechts", L"Name unten",
 			L"Stacky",
@@ -255,8 +272,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Aggiungi separatore tra sottomenu e collegamenti semplici",
 			L"ICONA DEL SOTTOMENU", L"COLONNE (SOTTOMENU UNICO)", L"LAYOUT DEL SOTTOMENU",
 			L"Salva", L"Crea menu", L"Elimina menu", L"Chiudi",
-			L"Sistema", L"Chiaro", L"Scuro",
-			L"Elenco con sottomenu", L"Griglia di icone", L"Doppia colonna", L"Doppia riga", L"Sottomenu unico",
+			L"Sistema", L"Grigio", L"Nero",
+			L"Azzurro", L"Verde", L"Arancione", L"Viola", L"Rosa", L"Rosso", L"Giallo", L"Marrone", L"Blu",
+			L"Elenco con sottomenu", L"Griglia di icone", L"Doppia colonna", L"Doppia riga", L"Sottomenu unico", L"Griglia di icone divisa",
 			L"Alfabetico", L"Cartelle prima",
 			L"Solo icona", L"Nome a destra", L"Nome sotto",
 			L"Stacky",
@@ -282,8 +300,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Dodaj separator między podmenu a zwykłymi skrótami",
 			L"IKONA PODMENU", L"KOLUMNY (POJEDYNCZE PODMENU)", L"UKŁAD PODMENU",
 			L"Zapisz", L"Utwórz menu", L"Usuń menu", L"Zamknij",
-			L"System", L"Jasny", L"Ciemny",
-			L"Lista z podmenu", L"Siatka ikon", L"Podwójna kolumna", L"Podwójny wiersz", L"Pojedyncze podmenu",
+			L"System", L"Szary", L"Czarny",
+			L"Błękitny", L"Zielony", L"Pomarańczowy", L"Fioletowy", L"Różowy", L"Czerwony", L"Żółty", L"Brązowy", L"Niebieski",
+			L"Lista z podmenu", L"Siatka ikon", L"Podwójna kolumna", L"Podwójny wiersz", L"Pojedyncze podmenu", L"Podzielona siatka ikon",
 			L"Alfabetycznie", L"Najpierw foldery",
 			L"Tylko ikona", L"Nazwa po prawej", L"Nazwa poniżej",
 			L"Stacky",
@@ -309,8 +328,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Добавить разделитель между подменю и простыми ярлыками",
 			L"ЗНАЧОК ПОДМЕНЮ", L"СТОЛБЦЫ (ОДНО ПОДМЕНЮ)", L"МАКЕТ ПОДМЕНЮ",
 			L"Сохранить", L"Создать меню", L"Удалить меню", L"Закрыть",
-			L"Системная", L"Светлая", L"Тёмная",
-			L"Список с подменю", L"Сетка значков", L"Двойной столбец", L"Двойная строка", L"Единое подменю",
+			L"Системная", L"Серая", L"Чёрная",
+			L"Голубой", L"Зелёный", L"Оранжевый", L"Фиолетовый", L"Розовый", L"Красный", L"Жёлтый", L"Коричневый", L"Синий",
+			L"Список с подменю", L"Сетка значков", L"Двойной столбец", L"Двойная строка", L"Единое подменю", L"Разделённая сетка значков",
 			L"По алфавиту", L"Сначала папки",
 			L"Только значок", L"Имя справа", L"Имя снизу",
 			L"Stacky",
@@ -336,8 +356,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"在子菜单和简单快捷方式之间添加分隔符",
 			L"子菜单图标", L"列数（单一子菜单）", L"子菜单布局",
 			L"保存", L"创建菜单", L"删除菜单", L"关闭",
-			L"系统", L"浅色", L"深色",
-			L"带子菜单的列表", L"图标网格", L"双列", L"双行", L"单一子菜单",
+			L"系统", L"灰色", L"黑色",
+			L"天蓝色", L"绿色", L"橙色", L"紫色", L"粉色", L"红色", L"黄色", L"棕色", L"蓝色",
+			L"带子菜单的列表", L"图标网格", L"双列", L"双行", L"单一子菜单", L"分区图标网格",
 			L"按字母顺序", L"文件夹优先",
 			L"仅图标", L"名称在右侧", L"名称在下方",
 			L"Stacky",
@@ -363,8 +384,9 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"サブメニューと単純なショートカットの間に区切り線を追加",
 			L"サブメニューアイコン", L"列数（単一サブメニュー）", L"サブメニューのレイアウト",
 			L"保存", L"メニューを作成", L"メニューを削除", L"閉じる",
-			L"システム", L"ライト", L"ダーク",
-			L"サブメニュー付きリスト", L"アイコングリッド", L"二重列", L"二重行", L"単一サブメニュー",
+			L"システム", L"グレー", L"ブラック",
+			L"スカイブルー", L"グリーン", L"オレンジ", L"バイオレット", L"ピンク", L"レッド", L"イエロー", L"ブラウン", L"ブルー",
+			L"サブメニュー付きリスト", L"アイコングリッド", L"二重列", L"二重行", L"単一サブメニュー", L"分割アイコングリッド",
 			L"アルファベット順", L"フォルダーを先に",
 			L"アイコンのみ", L"名前を右に", L"名前を下に",
 			L"Stacky",
@@ -397,6 +419,56 @@ COLORREF ReadAccentColor() {
 	return RGB(0, 120, 215);
 }
 
+// Reads whether the system is currently using a light apps theme, the same
+// registry value consulted by the main engine (stacky.cpp) to pick the
+// "system" default theme.
+bool IsSystemDarkMode() {
+	HKEY hKey;
+	DWORD value = 1, size = sizeof(value);
+	if (::RegOpenKeyEx(HKEY_CURRENT_USER,
+		L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+		0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+		::RegQueryValueEx(hKey, L"AppsUseLightTheme", nullptr, nullptr, (LPBYTE)&value, &size);
+		::RegCloseKey(hKey);
+	}
+	return value == 0; // zero = dark
+}
+
+// Mirrors App::SelectionColor()/BackgroundColor() in stacky.cpp, so the
+// color-mode swatch shown in the configuration window matches the actual
+// menu colors produced by each theme option.
+// Fixed accent/background pairs for the nine custom menu color presets, in
+// the exact order they appear in the COLOR DEL MENU combo box (must match
+// kCustomThemeColors in stacky.cpp).
+struct ConfigCustomThemeColors { COLORREF accent; COLORREF background; };
+static const ConfigCustomThemeColors kConfigCustomThemeColors[9] = {
+	{ RGB(0xC3, 0xD6, 0xE0), RGB(0xEC, 0xEF, 0xF4) }, // CELESTE
+	{ RGB(0xA9, 0xD6, 0xB2), RGB(0xD2, 0xE9, 0xD7) }, // VERDE
+	{ RGB(0xF9, 0xB5, 0x66), RGB(0xFC, 0xDE, 0xBA) }, // NARANJA
+	{ RGB(0xC0, 0xAE, 0xDE), RGB(0xE8, 0xDF, 0xF4) }, // VIOLETA
+	{ RGB(0xED, 0xB1, 0xC8), RGB(0xF8, 0xD9, 0xDE) }, // ROSA
+	{ RGB(0xFF, 0x72, 0x80), RGB(0xFF, 0xC6, 0xC9) }, // ROJO
+	{ RGB(0xEF, 0xCF, 0x6A), RGB(0xFF, 0xF7, 0xD1) }, // AMARILLO
+	{ RGB(0xDD, 0xB9, 0x96), RGB(0xF2, 0xDA, 0xC6) }, // MARRÓN
+	{ RGB(0x7B, 0xB5, 0xE3), RGB(0xCE, 0xD6, 0xFF) }, // AZUL
+};
+
+COLORREF ThemeAccentColorFor(StackyConfigTheme theme, COLORREF systemAccent) {
+	if (theme >= SCFG_THEME_SKYBLUE && theme <= SCFG_THEME_BLUE)
+		return kConfigCustomThemeColors[(int)theme - (int)SCFG_THEME_SKYBLUE].accent;
+	if (theme == SCFG_THEME_LIGHT) return RGB(0xE0, 0xE0, 0xE0);
+	if (theme == SCFG_THEME_SYSTEM) return systemAccent;
+	return RGB(64, 64, 64); // SCFG_THEME_DARK
+}
+
+COLORREF ThemeBackgroundColorFor(StackyConfigTheme theme) {
+	if (theme >= SCFG_THEME_SKYBLUE && theme <= SCFG_THEME_BLUE)
+		return kConfigCustomThemeColors[(int)theme - (int)SCFG_THEME_SKYBLUE].background;
+	if (theme == SCFG_THEME_LIGHT) return RGB(0xF9, 0xF9, 0xF9);
+	if (theme == SCFG_THEME_DARK) return RGB(32, 32, 32);
+	return IsSystemDarkMode() ? RGB(32, 32, 32) : ::GetSysColor(COLOR_MENU); // SCFG_THEME_SYSTEM
+}
+
 enum ControlId {
 	IDC_TREE = 1001,
 	IDC_BTN_CANCEL = 1002,
@@ -427,6 +499,7 @@ enum ControlId {
 	IDC_CHECK_NAMES_BELOW = 1117,
 	IDC_CHECK_NAMES_RIGHT = 1118,
 	IDC_CHECK_ADD_SEPARATOR = 1120,
+	IDC_THEME_SWATCH = 1121,
 
 	// Submenu-only panel controls
 	IDC_LBL_SUBICON = 1150,
@@ -482,7 +555,7 @@ struct ConfigWindowState {
 	HWND hwndLblName = nullptr, hwndEditName = nullptr;
 	HWND hwndLblIcon = nullptr, hwndEditIcon = nullptr, hwndBtnBrowseIcon = nullptr, hwndIconPreview = nullptr;
 	HWND hwndCheckMini = nullptr;
-	HWND hwndLblTheme = nullptr, hwndComboTheme = nullptr;
+	HWND hwndLblTheme = nullptr, hwndComboTheme = nullptr, hwndThemeSwatch = nullptr;
 	HWND hwndLblPosition = nullptr, hwndCheckMousePos = nullptr;
 	HWND hwndLblMode = nullptr, hwndComboMode = nullptr;
 	HWND hwndLblSort = nullptr, hwndComboSort = nullptr;
@@ -597,6 +670,7 @@ void RefreshDisabledStates(ConfigWindowState* state) {
 		StackyFolderConfig rootCfg = StackyFolderConfig::Load(state->nodes[idx].fullPath);
 		switch (rootCfg.mode) {
 		case SCFG_MODE_ICONGRID:
+		case SCFG_MODE_SPLITGRID:
 			node.disabled = true;
 			break;
 		case SCFG_MODE_SINGLESUB:
@@ -893,12 +967,22 @@ void PopulateCombos(ConfigWindowState* state) {
 	ComboBox_AddString(state->hwndComboTheme, S.themeSystem);
 	ComboBox_AddString(state->hwndComboTheme, S.themeLight);
 	ComboBox_AddString(state->hwndComboTheme, S.themeDark);
+	ComboBox_AddString(state->hwndComboTheme, S.themeSkyBlue);
+	ComboBox_AddString(state->hwndComboTheme, S.themeGreen);
+	ComboBox_AddString(state->hwndComboTheme, S.themeOrange);
+	ComboBox_AddString(state->hwndComboTheme, S.themeViolet);
+	ComboBox_AddString(state->hwndComboTheme, S.themePink);
+	ComboBox_AddString(state->hwndComboTheme, S.themeRed);
+	ComboBox_AddString(state->hwndComboTheme, S.themeYellow);
+	ComboBox_AddString(state->hwndComboTheme, S.themeBrown);
+	ComboBox_AddString(state->hwndComboTheme, S.themeBlue);
 
 	ComboBox_AddString(state->hwndComboMode, S.modeList);
 	ComboBox_AddString(state->hwndComboMode, S.modeIconGrid);
 	ComboBox_AddString(state->hwndComboMode, S.modeDoubleCol);
 	ComboBox_AddString(state->hwndComboMode, S.modeDoubleRow);
 	ComboBox_AddString(state->hwndComboMode, S.modeSingleSub);
+	ComboBox_AddString(state->hwndComboMode, S.modeSplitGrid);
 
 	ComboBox_AddString(state->hwndComboSort, S.sortAlpha);
 	ComboBox_AddString(state->hwndComboSort, S.sortFoldersFirst);
@@ -935,8 +1019,18 @@ void CreateRightPanelControls(HWND hwnd, HINSTANCE hInst, ConfigWindowState* sta
 		x, y, w, rowH, hwnd, (HMENU)IDC_CHECK_MINI, hInst, nullptr); y += gap;
 
 	state->hwndLblTheme = CreateLabel(hwnd, hInst, S.lblTheme, x, y, w, 18, IDC_LBL_THEME); y += 20;
-	state->hwndComboTheme = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-		x, y, w, 200, hwnd, (HMENU)IDC_COMBO_THEME, hInst, nullptr); y += gap;
+	{
+		int swatchH = rowH;
+		int swatchW = rowH * 2;
+		int swatchMargin = 8;
+		int comboW = w - swatchW - swatchMargin;
+		state->hwndComboTheme = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+			x, y, comboW, 200, hwnd, (HMENU)IDC_COMBO_THEME, hInst, nullptr);
+		state->hwndThemeSwatch = ::CreateWindowEx(0, L"STATIC", L"",
+			WS_CHILD | WS_VISIBLE | SS_OWNERDRAW,
+			x + w - swatchW, y, swatchW, swatchH, hwnd, (HMENU)IDC_THEME_SWATCH, hInst, nullptr);
+	}
+	y += gap;
 
 	state->hwndLblPosition = CreateLabel(hwnd, hInst, S.lblPosition, x, y, w, 18, IDC_LBL_POSITION); y += 20;
 	state->hwndCheckMousePos = ::CreateWindow(L"BUTTON", S.checkMousePos, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
@@ -1007,7 +1101,7 @@ void HideAllPanelControls(ConfigWindowState* state) {
 		state->hwndLblName, state->hwndEditName,
 		state->hwndLblIcon, state->hwndEditIcon, state->hwndBtnBrowseIcon, state->hwndIconPreview,
 		state->hwndCheckMini,
-		state->hwndLblTheme, state->hwndComboTheme,
+		state->hwndLblTheme, state->hwndComboTheme, state->hwndThemeSwatch,
 		state->hwndLblPosition, state->hwndCheckMousePos,
 		state->hwndLblMode, state->hwndComboMode,
 		state->hwndLblSort, state->hwndComboSort,
@@ -1024,24 +1118,26 @@ void HideAllPanelControls(ConfigWindowState* state) {
 
 // Enables/disables the "Agregar separador de submenús y accesos directos
 // simples" checkbox for a given effective mode and folder: only enabled in
-// "Lista con submenús" (SCFG_MODE_DEFAULT), "Submenú único" (SCFG_MODE_SINGLESUB)
-// and "Doble columna" (SCFG_MODE_DOUBLE_COL), only when the folder actually
-// mixes subfolders (submenus) with plain shortcuts (a separator makes no
-// sense if the folder has only one or the other), and only when the
-// effective sort order (always driven by the top-level root's ORDEN, since
-// --foldersfirst is a whole-menu setting) is NOT alphabetical: the automatic
-// separator groups submenu folders before plain shortcuts, which only makes
-// sense together with "Carpetas primero". isAlphabetical must be computed
-// by the caller (live combo selection for the currently-visible root panel,
-// or the persisted root's sort_mode for a submenu, since the ORDEN combo
-// isn't shown/editable for submenus).
+// "Lista con submenús" (SCFG_MODE_DEFAULT) and "Submenú único" (SCFG_MODE_SINGLESUB),
+// only when the folder actually mixes subfolders (submenus) with plain
+// shortcuts (a separator makes no sense if the folder has only one or the
+// other), and only when the effective sort order (always driven by the
+// top-level root's ORDEN, since --foldersfirst is a whole-menu setting) is
+// NOT alphabetical: the automatic separator groups submenu folders before
+// plain shortcuts, which only makes sense together with "Carpetas primero".
+// "Doble columna" (SCFG_MODE_DOUBLE_COL) does not support the separator at
+// all, regardless of content/order, so the checkbox is disabled and forced
+// unchecked for it.
+// isAlphabetical must be computed by the caller (live combo selection for the
+// currently-visible root panel, or the persisted root's sort_mode for a
+// submenu, since the ORDEN combo isn't shown/editable for submenus).
 void UpdateAddSeparatorEnabled(ConfigWindowState* state, StackyConfigMode mode, const std::wstring& folderPath, bool isAlphabetical) {
 	if (!state->hwndCheckAddSeparator) return;
-	bool modeAllows = mode == SCFG_MODE_DEFAULT || mode == SCFG_MODE_SINGLESUB || mode == SCFG_MODE_DOUBLE_COL;
+	bool modeAllows = mode == SCFG_MODE_DEFAULT || mode == SCFG_MODE_SINGLESUB;
 	bool hasSubfolder = false, hasPlainItem = false;
 	if (!folderPath.empty()) FolderContentKind(folderPath, hasSubfolder, hasPlainItem);
 	bool mixedContent = hasSubfolder && hasPlainItem;
-	if (isAlphabetical) Button_SetCheck(state->hwndCheckAddSeparator, BST_UNCHECKED);
+	if (isAlphabetical || mode == SCFG_MODE_DOUBLE_COL) Button_SetCheck(state->hwndCheckAddSeparator, BST_UNCHECKED);
 	::EnableWindow(state->hwndCheckAddSeparator, modeAllows && mixedContent && !isAlphabetical);
 }
 
@@ -1060,13 +1156,14 @@ void UpdateGridColsEnabled(ConfigWindowState* state) {
 	if (!state->hwndComboMode) return;
 	int mode = ComboBox_GetCurSel(state->hwndComboMode);
 	bool isIconGrid = mode == (int)SCFG_MODE_ICONGRID;
+	bool isSplitGrid = mode == (int)SCFG_MODE_SPLITGRID;
 	bool isDoubleCol = mode == (int)SCFG_MODE_DOUBLE_COL;
 	bool isDoubleRow = mode == (int)SCFG_MODE_DOUBLE_ROW;
 	bool isDefault = mode == (int)SCFG_MODE_DEFAULT;
 	bool isSingleSub = mode == (int)SCFG_MODE_SINGLESUB;
 	bool namesLocked = isDefault || isSingleSub;
 
-	if (state->hwndEditCols) ::EnableWindow(state->hwndEditCols, isIconGrid);
+	if (state->hwndEditCols) ::EnableWindow(state->hwndEditCols, isIconGrid || isSplitGrid);
 
 	if (state->hwndCheckNamesBelow) {
 		::EnableWindow(state->hwndCheckNamesBelow, !namesLocked);
@@ -1078,12 +1175,12 @@ void UpdateGridColsEnabled(ConfigWindowState* state) {
 		else if (namesLocked) Button_SetCheck(state->hwndCheckNamesRight, BST_CHECKED);
 	}
 
-	// In "Cuadrícula de iconos" mode, "debajo" and "a la derecha" are
-	// mutually exclusive: --iconmenu-NN-name and --iconmenu-NN-name-right
-	// can't both apply at once. If both ended up checked (e.g. right after
-	// switching into this mode from another one), keep "debajo" checked and
-	// uncheck "a la derecha".
-	if (isIconGrid && state->hwndCheckNamesBelow && state->hwndCheckNamesRight) {
+	// In "Cuadrícula de iconos" / "Cuadrícula dividida de iconos" modes,
+	// "debajo" and "a la derecha" are mutually exclusive: --iconmenu-NN-name
+	// and --iconmenu-NN-name-right can't both apply at once. If both ended
+	// up checked (e.g. right after switching into this mode from another
+	// one), keep "debajo" checked and uncheck "a la derecha".
+	if ((isIconGrid || isSplitGrid) && state->hwndCheckNamesBelow && state->hwndCheckNamesRight) {
 		bool belowChecked = Button_GetCheck(state->hwndCheckNamesBelow) == BST_CHECKED;
 		bool rightChecked = Button_GetCheck(state->hwndCheckNamesRight) == BST_CHECKED;
 		if (belowChecked && rightChecked) {
@@ -1100,6 +1197,7 @@ void ApplyConfigToControls(ConfigWindowState* state, const StackyFolderConfig& c
 	SetPreviewIcon(state->hwndIconPreview, state->hIconPreview, menuIconPath, folderPath);
 	Button_SetCheck(state->hwndCheckMini, cfg.mini_icons ? BST_CHECKED : BST_UNCHECKED);
 	ComboBox_SetCurSel(state->hwndComboTheme, (int)cfg.theme);
+	if (state->hwndThemeSwatch) ::InvalidateRect(state->hwndThemeSwatch, nullptr, TRUE);
 	Button_SetCheck(state->hwndCheckMousePos, cfg.mouse_position ? BST_CHECKED : BST_UNCHECKED);
 	ComboBox_SetCurSel(state->hwndComboMode, (int)cfg.mode);
 	ComboBox_SetCurSel(state->hwndComboSort, (int)cfg.sort_mode);
@@ -1200,7 +1298,7 @@ void ShowPanelFor(ConfigWindowState* state, int nodeIndex) {
 			state->hwndLblName, state->hwndEditName,
 			state->hwndLblIcon, state->hwndEditIcon, state->hwndBtnBrowseIcon, state->hwndIconPreview,
 			state->hwndCheckMini,
-			state->hwndLblTheme, state->hwndComboTheme,
+			state->hwndLblTheme, state->hwndComboTheme, state->hwndThemeSwatch,
 			state->hwndLblPosition, state->hwndCheckMousePos,
 			state->hwndLblMode, state->hwndComboMode,
 			state->hwndLblSort, state->hwndComboSort,
@@ -1523,6 +1621,61 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 		::GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
 	switch (msg) {
+	case WM_DRAWITEM: {
+		DRAWITEMSTRUCT* dis = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+		if (dis->CtlID == IDC_THEME_SWATCH) {
+			StackyConfigTheme theme = state->hwndComboTheme
+				? (StackyConfigTheme)ComboBox_GetCurSel(state->hwndComboTheme)
+				: SCFG_THEME_SYSTEM;
+			if ((int)theme < 0) theme = SCFG_THEME_SYSTEM;
+			COLORREF accent = ThemeAccentColorFor(theme, state->accentColor);
+			COLORREF bg = ThemeBackgroundColorFor(theme);
+
+			RECT rc = dis->rcItem;
+			int w = rc.right - rc.left;
+			int h = rc.bottom - rc.top;
+
+			// Erase with the panel's background first (the rounded shape
+			// won't cover the item's corners, so this avoids leftover
+			// garbage/white corners from the default STATIC background).
+			HBRUSH parentBr = (HBRUSH)(COLOR_BTNFACE + 1);
+			::FillRect(dis->hDC, &rc, parentBr);
+
+			using namespace Gdiplus;
+			Graphics graphics(dis->hDC);
+			graphics.SetSmoothingMode(SmoothingModeAntiAlias);
+
+			float radius = (float)min(h, 10) * 0.6f;
+			float diameter = radius * 2.0f;
+			float inset = 0.75f; // keeps the 1px border fully inside the item rect
+			float fx = inset, fy = inset;
+			float fw = (float)w - inset * 2.0f, fh = (float)h - inset * 2.0f;
+
+			GraphicsPath path;
+			path.AddArc(fx, fy, diameter, diameter, 180.0f, 90.0f);
+			path.AddArc(fx + fw - diameter, fy, diameter, diameter, 270.0f, 90.0f);
+			path.AddArc(fx + fw - diameter, fy + fh - diameter, diameter, diameter, 0.0f, 90.0f);
+			path.AddArc(fx, fy + fh - diameter, diameter, diameter, 90.0f, 90.0f);
+			path.CloseFigure();
+
+			Region clipRegion(&path);
+			graphics.SetClip(&clipRegion);
+
+			Color accentColor((BYTE)GetRValue(accent), (BYTE)GetGValue(accent), (BYTE)GetBValue(accent));
+			Color bgColor((BYTE)GetRValue(bg), (BYTE)GetGValue(bg), (BYTE)GetBValue(bg));
+			SolidBrush accentBrush(accentColor);
+			SolidBrush bgBrush(bgColor);
+			graphics.FillRectangle(&accentBrush, fx, fy, fw / 2.0f, fh);
+			graphics.FillRectangle(&bgBrush, fx + fw / 2.0f, fy, fw - fw / 2.0f, fh);
+
+			graphics.ResetClip();
+			Color borderColor(60, 0, 0, 0);
+			Pen borderPen(borderColor, 1.0f);
+			graphics.DrawPath(&borderPen, &path);
+			return TRUE;
+		}
+		break;
+	}
 	case WM_CREATE: {
 		state = new ConfigWindowState();
 		::SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
@@ -1774,12 +1927,13 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 		case IDC_CHECK_NAMES_BELOW:
 		case IDC_CHECK_NAMES_RIGHT:
 			if (HIWORD(wParam) == BN_CLICKED) {
-				// In "Cuadrícula de iconos" mode, "debajo" (--iconmenu-NN-name)
-				// and "a la derecha" (--iconmenu-NN-name-right) are mutually
-				// exclusive: checking one unchecks the other, and both can be
-				// left unchecked to fall back to plain --iconmenu-NN.
+				// In "Cuadrícula de iconos" and "Cuadrícula dividida de iconos"
+				// modes, "debajo" (--iconmenu-NN-name) and "a la derecha"
+				// (--iconmenu-NN-name-right) are mutually exclusive: checking
+				// one unchecks the other, and both can be left unchecked to
+				// fall back to plain --iconmenu-NN.
 				int mode = state->hwndComboMode ? ComboBox_GetCurSel(state->hwndComboMode) : -1;
-				if (mode == (int)SCFG_MODE_ICONGRID) {
+				if (mode == (int)SCFG_MODE_ICONGRID || mode == (int)SCFG_MODE_SPLITGRID) {
 					if (LOWORD(wParam) == IDC_CHECK_NAMES_BELOW &&
 						Button_GetCheck(state->hwndCheckNamesBelow) == BST_CHECKED) {
 						Button_SetCheck(state->hwndCheckNamesRight, BST_UNCHECKED);
@@ -1791,11 +1945,16 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 				SaveSelectedNodeConfig(state);
 			}
 			return 0;
+		case IDC_COMBO_THEME:
+			if (HIWORD(wParam) == CBN_SELCHANGE) {
+				if (state->hwndThemeSwatch) ::InvalidateRect(state->hwndThemeSwatch, nullptr, TRUE);
+				SaveSelectedNodeConfig(state);
+			}
+			return 0;
 		case IDC_EDIT_NAME:
 		case IDC_EDIT_ICON:
 		case IDC_CHECK_MINI:
 		case IDC_CHECK_ADD_SEPARATOR:
-		case IDC_COMBO_THEME:
 		case IDC_CHECK_MOUSEPOS:
 		case IDC_COMBO_SORT:
 		case IDC_EDIT_COLS:
@@ -1827,6 +1986,10 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 } // namespace
 
 int RunStackyConfigWindow(HINSTANCE hInstance) {
+	Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+	ULONG_PTR gdiplusToken = 0;
+	Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr);
+
 	INITCOMMONCONTROLSEX icc = {0};
 	icc.dwSize = sizeof(icc);
 	icc.dwICC = ICC_TREEVIEW_CLASSES | ICC_STANDARD_CLASSES;
@@ -1852,7 +2015,10 @@ int RunStackyConfigWindow(HINSTANCE hInstance) {
 		WS_OVERLAPPEDWINDOW,
 		posX, posY, winW, winH,
 		nullptr, nullptr, hInstance, nullptr);
-	if (!hwnd) return 0;
+	if (!hwnd) {
+		Gdiplus::GdiplusShutdown(gdiplusToken);
+		return 0;
+	}
 
 	::ShowWindow(hwnd, SW_SHOWNORMAL);
 	::UpdateWindow(hwnd);
@@ -1862,5 +2028,6 @@ int RunStackyConfigWindow(HINSTANCE hInstance) {
 		::TranslateMessage(&msg);
 		::DispatchMessage(&msg);
 	}
+	Gdiplus::GdiplusShutdown(gdiplusToken);
 	return (int)msg.wParam;
 }

@@ -23,13 +23,25 @@ enum StackyConfigMode {
 	SCFG_MODE_ICONGRID     = 1, // --iconmenu-NN
 	SCFG_MODE_DOUBLE_COL   = 2, // --iconmenu-C2
 	SCFG_MODE_DOUBLE_ROW   = 3, // --iconmenu-F2
-	SCFG_MODE_SINGLESUB    = 4  // --singlesubmenu
+	SCFG_MODE_SINGLESUB    = 4, // --singlesubmenu
+	SCFG_MODE_SPLITGRID    = 5  // split icon grid: root folder must contain only
+								// subfolders, each rendered as a TITLE + separator +
+								// icon grid of that subfolder's plain shortcuts
 };
 
 enum StackyConfigTheme {
 	SCFG_THEME_SYSTEM = 0,
 	SCFG_THEME_LIGHT  = 1,
-	SCFG_THEME_DARK   = 2
+	SCFG_THEME_DARK   = 2,
+	SCFG_THEME_SKYBLUE = 3,  // CELESTE
+	SCFG_THEME_GREEN   = 4,  // VERDE
+	SCFG_THEME_ORANGE  = 5,  // NARANJA
+	SCFG_THEME_VIOLET  = 6,  // VIOLETA
+	SCFG_THEME_PINK    = 7,  // ROSA
+	SCFG_THEME_RED     = 8,  // ROJO
+	SCFG_THEME_YELLOW  = 9,  // AMARILLO
+	SCFG_THEME_BROWN   = 10, // MARRÓN
+	SCFG_THEME_BLUE    = 11  // AZUL
 };
 
 enum StackyConfigSort {

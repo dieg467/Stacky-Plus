@@ -134,6 +134,9 @@ enum GridMode {
 	GRID_F2 = 5,  // row-based: items with submenu on row 1, others on row 2; submenus open upward
 	GRID_F2_NAME = 6,  // same as GRID_F2, with truncated name below each icon
 	GRID_NAME_RIGHT = 10, // iconmenu-NN-name-right: NN cols, name to the right of the icon, default text size, no gap
+	GRID_SPLIT = 11, // split icon grid: root-only layout, one section per subfolder
+					  // (TITLE + separator + icon grid of that subfolder's plain shortcuts),
+					  // stacked vertically in a single window (no flyout submenus).
 
 	// --singlesubmenu mode: used ONLY for the grid window opened for a .submenu folder
 	// (never for the root menu, and these submenus never have child submenus).
@@ -147,6 +150,23 @@ enum ThemeMode {
 	THEME_SYSTEM = 0, // follow the system color mode/accent (cached, event-driven)
 	THEME_LIGHT  = 1, // --light-mode: force current light appearance
 	THEME_DARK   = 2, // --dark-mode: force current dark appearance
+	THEME_CUSTOM = 3, // one of the fixed custom menu colors chosen in the Configuration window
+};
+
+// Fixed accent (pointer-hover) and background colors for each of the nine
+// custom menu color presets offered in the Configuration window. Indexed by
+// (StackyConfigTheme value - SCFG_THEME_SKYBLUE).
+struct CustomThemeColors { COLORREF accent; COLORREF background; };
+static const CustomThemeColors kCustomThemeColors[9] = {
+	{ RGB(0xC3, 0xD6, 0xE0), RGB(0xEC, 0xEF, 0xF4) }, // CELESTE
+	{ RGB(0xA9, 0xD6, 0xB2), RGB(0xD2, 0xE9, 0xD7) }, // VERDE
+	{ RGB(0xF9, 0xB5, 0x66), RGB(0xFC, 0xDE, 0xBA) }, // NARANJA
+	{ RGB(0xC0, 0xAE, 0xDE), RGB(0xE8, 0xDF, 0xF4) }, // VIOLETA
+	{ RGB(0xED, 0xB1, 0xC8), RGB(0xF8, 0xD9, 0xDE) }, // ROSA
+	{ RGB(0xFF, 0x72, 0x80), RGB(0xFF, 0xC6, 0xC9) }, // ROJO
+	{ RGB(0xEF, 0xCF, 0x6A), RGB(0xFF, 0xF7, 0xD1) }, // AMARILLO
+	{ RGB(0xDD, 0xB9, 0x96), RGB(0xF2, 0xDA, 0xC6) }, // MARRÓN
+	{ RGB(0x7B, 0xB5, 0xE3), RGB(0xCE, 0xD6, 0xFF) }, // AZUL
 };
 
 // Timer IDs used by PopupWndProc
@@ -2342,6 +2362,23 @@ struct MenuEntry {
 	bool is_path = false;
 };
 
+// Owner-draw entry for the right-click context menus (ShowSubfolderContextMenu/
+// ShowShortcutContextMenu), so their background/hover/text colors follow the
+// user-selected COLOR DEL MENU (SelectionColor()/BackgroundColor()) exactly
+// like the main menu/submenu items, instead of the classic system menu theme.
+// Pointers to these are tagged (bit 0 set) in MENUITEMINFO::dwItemData so
+// on_measure_item/on_draw_item can tell them apart from MenuEntry* pointers
+// (both are heap allocations, at least 2-byte aligned, so bit 0 is otherwise
+// always 0).
+struct CtxItemEntry {
+	String text;
+	HBITMAP bmp = nullptr; // not owned; caller still owns/destroys the HBITMAP
+};
+
+static ULONG_PTR TagCtxItemData(CtxItemEntry* e) {
+	return (ULONG_PTR)e | 1;
+}
+
 /**************************************************************************************************
  * DPI-aware icon cache for owner-draw
  **************************************************************************************************/
@@ -2466,7 +2503,10 @@ struct App {
 		if (rootCfg.loaded) {
 			if (rootCfg.theme == SCFG_THEME_DARK)       theme_mode = THEME_DARK;
 			else if (rootCfg.theme == SCFG_THEME_LIGHT) theme_mode = THEME_LIGHT;
-			else                                        theme_mode = THEME_SYSTEM;
+			else if (rootCfg.theme >= SCFG_THEME_SKYBLUE && rootCfg.theme <= SCFG_THEME_BLUE) {
+				theme_mode = THEME_CUSTOM;
+				custom_theme_index = (int)rootCfg.theme - (int)SCFG_THEME_SKYBLUE;
+			} else                                      theme_mode = THEME_SYSTEM;
 			dark_mode = (theme_mode == THEME_DARK) ||
 				(theme_mode == THEME_SYSTEM && GetSystemTheme().dark);
 			mouse_position = rootCfg.mouse_position;
@@ -2491,6 +2531,12 @@ struct App {
 				break;
 			case SCFG_MODE_SINGLESUB:
 				grid_mode = GRID_NONE; // root stays as default list in --singlesubmenu
+				break;
+			case SCFG_MODE_SPLITGRID:
+				icon_cols = rootCfg.grid_cols;
+				grid_mode = GRID_SPLIT;
+				split_names_right = rootCfg.grid_names_right;
+				split_names_below = !rootCfg.grid_names_right && rootCfg.grid_names_below;
 				break;
 			default:
 				grid_mode = GRID_NONE;
@@ -2544,10 +2590,14 @@ struct App {
 
 		// Calculate menu position above the Stacky taskbar icon
 		int menuX = 0, menuY = 0;
-		if (grid_mode != GRID_NONE) {
+		if (grid_mode == GRID_SPLIT) {
+			auto sg = MeasureSplitGrid();
+			CalculateMenuPosition(menuX, menuY, sg.totalW, sg.totalH);
+			ShowIconGridAt(menuX, menuY, sg.totalW, sg.totalH);
+		} else if (grid_mode != GRID_NONE) {
 			auto gm = MeasureGridSize();
 			CalculateMenuPosition(menuX, menuY, gm.totalW, gm.totalH);
-			ShowIconGridAt(menuX, menuY);
+			ShowIconGridAt(menuX, menuY, gm.totalW, gm.totalH);
 		} else {
 			auto menuSz = MeasureMenuSize();
 			CalculateMenuPosition(menuX, menuY, menuSz.w, menuSz.h);
@@ -2579,6 +2629,49 @@ struct App {
 		ShellExecute(nullptr, nullptr, exePath.c_str(), L"", nullptr, SW_SHOWNORMAL);
 	}
 
+	// Inserts an owner-drawn entry (MFT_OWNERDRAW) into a right-click context
+	// menu, so its background/hover/text colors can follow the user-selected
+	// COLOR DEL MENU (SelectionColor()/BackgroundColor()), exactly like the
+	// main menu/submenu items. The returned CtxItemEntry* is appended to
+	// `entries` so the caller can delete it after TrackPopupMenuEx returns.
+	// `bmp` is not owned here; the caller keeps destroying its HBITMAPs as before.
+	static void InsertCtxMenuItem(HMENU menu, std::vector<CtxItemEntry*>& entries, UINT id, const wchar_t* text, HBITMAP bmp) {
+		auto* e = new CtxItemEntry();
+		e->text = text;
+		e->bmp = bmp;
+		entries.push_back(e);
+
+		MENUITEMINFO mii{ sizeof(mii) };
+		mii.fMask = MIIM_FTYPE | MIIM_DATA | MIIM_ID;
+		mii.fType = MFT_OWNERDRAW;
+		mii.dwItemData = TagCtxItemData(e);
+		mii.wID = id;
+		InsertMenuItem(menu, -1, TRUE, &mii);
+	}
+
+	static void InsertCtxMenuSeparator(HMENU menu) {
+		MENUITEMINFO mii{ sizeof(mii) };
+		mii.fMask = MIIM_FTYPE | MIIM_DATA;
+		mii.fType = MFT_OWNERDRAW;
+		mii.dwItemData = (ULONG_PTR)nullptr;
+		InsertMenuItem(menu, -1, TRUE, &mii);
+	}
+
+	// Sets the menu's own background brush (MIM_BACKGROUND) to the selected
+	// COLOR DEL MENU, so the thin margin/border Windows paints around the
+	// owner-drawn items (which on_draw_item never touches) also matches it,
+	// instead of being left as the default gray COLOR_MENU fill.
+	// Returns the created brush so the caller can DeleteObject() it once the
+	// popup has been torn down (DestroyMenu does not free hbrBack for us).
+	HBRUSH ApplyCtxMenuBackgroundBrush(HMENU menu) {
+		HBRUSH hbr = CreateSolidBrush(BackgroundColor());
+		MENUINFO mi{ sizeof(mi) };
+		mi.fMask = MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
+		mi.hbrBack = hbr;
+		SetMenuInfo(menu, &mi);
+		return hbr;
+	}
+
 	// Build and show the right-click context menu for a submenu-folder icon.
 	// owner: window that will own the popup (its DPI is used for icon scaling).
 	// submenu_path: absolute path of the target .submenu / .submenu-mini folder.
@@ -2595,60 +2688,21 @@ struct App {
 		HBITMAP bmpSettings = Util::CreateSettingsGearBitmap(px);
 
 		HMENU ctxMenu = CreatePopupMenu();
+		std::vector<CtxItemEntry*> ctxEntries;
+		HBRUSH ctxBgBrush = ApplyCtxMenuBackgroundBrush(ctxMenu);
 
-		MENUITEMINFO mii{ sizeof(mii) };
-		mii.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii.dwTypeData = (LPWSTR)S.open_subfolder;
-		mii.wID = WM_CTX_OPEN_SUBFOLDER;
-		mii.hbmpItem = bmpTree;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii);
-
-		MENUITEMINFO mii2{ sizeof(mii2) };
-		mii2.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii2.dwTypeData = (LPWSTR)S.open_menu_folder;
-		mii2.wID = WM_CTX_OPEN_MENU_FOLDER;
-		mii2.hbmpItem = bmpFolder;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii2);
-
-		MENUITEMINFO mii3{ sizeof(mii3) };
-		mii3.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii3.dwTypeData = (LPWSTR)S.open_stacky_folder;
-		mii3.wID = WM_CTX_OPEN_STACKY_FOLDER;
-		mii3.hbmpItem = bmpStacky;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii3);
-
-		MENUITEMINFO sep{ sizeof(sep) };
-		sep.fMask = MIIM_FTYPE;
-		sep.fType = MFT_SEPARATOR;
-		InsertMenuItem(ctxMenu, -1, TRUE, &sep);
-
-		MENUITEMINFO miiSettings{ sizeof(miiSettings) };
-		miiSettings.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		miiSettings.dwTypeData = (LPWSTR)S.settings;
-		miiSettings.wID = WM_CTX_OPEN_SETTINGS;
-		miiSettings.hbmpItem = bmpSettings;
-		InsertMenuItem(ctxMenu, -1, TRUE, &miiSettings);
-
-		MENUITEMINFO sep2{ sizeof(sep2) };
-		sep2.fMask = MIIM_FTYPE;
-		sep2.fType = MFT_SEPARATOR;
-		InsertMenuItem(ctxMenu, -1, TRUE, &sep2);
-
-		MENUITEMINFO mii4{ sizeof(mii4) };
-		mii4.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii4.dwTypeData = (LPWSTR)S.close_menu;
-		mii4.wID = WM_CTX_CLOSE_MENU;
-		mii4.hbmpItem = bmpCross;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii4);
-
-		Util::EnableDarkContextMenu(dark_mode);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_SUBFOLDER, S.open_subfolder, bmpTree);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_MENU_FOLDER, S.open_menu_folder, bmpFolder);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_STACKY_FOLDER, S.open_stacky_folder, bmpStacky);
+		InsertCtxMenuSeparator(ctxMenu);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_SETTINGS, S.settings, bmpSettings);
+		InsertCtxMenuSeparator(ctxMenu);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_CLOSE_MENU, S.close_menu, bmpCross);
 
 		POINT pt{}; GetCursorPos(&pt);
 		SetForegroundWindow(owner);
 		UINT cmd = (UINT)TrackPopupMenuEx(ctxMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, owner, nullptr);
 		PostMessage(owner, WM_NULL, 0, 0); // needed so the menu dismisses correctly on some Windows versions
-
-		Util::EnableDarkContextMenu(false);
 
 		// Restore foreground/focus to the root popup/grid window (walking up through
 		// hover-child/submenu parents if needed) so it correctly receives WM_KILLFOCUS
@@ -2656,6 +2710,8 @@ struct App {
 		RestoreFocusToRootMenuWindow(owner);
 
 		DestroyMenu(ctxMenu);
+		DeleteObject(ctxBgBrush);
+		for (auto* e : ctxEntries) delete e;
 		if (bmpTree)     DeleteObject(bmpTree);
 		if (bmpFolder)   DeleteObject(bmpFolder);
 		if (bmpStacky)   DeleteObject(bmpStacky);
@@ -2718,76 +2774,29 @@ struct App {
 		HBITMAP bmpSettings   = Util::CreateSettingsGearBitmap(px);
 
 		HMENU ctxMenu = CreatePopupMenu();
+		std::vector<CtxItemEntry*> ctxEntries;
+		HBRUSH ctxBgBrush = ApplyCtxMenuBackgroundBrush(ctxMenu);
 
 		if (isExe && bmpShield) {
-			MENUITEMINFO miiAdmin{ sizeof(miiAdmin) };
-			miiAdmin.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-			miiAdmin.dwTypeData = (LPWSTR)S.run_as_admin;
-			miiAdmin.wID = WM_CTX_RUN_AS_ADMIN;
-			miiAdmin.hbmpItem = bmpShield;
-			InsertMenuItem(ctxMenu, -1, TRUE, &miiAdmin);
-
-			MENUITEMINFO sepAdmin{ sizeof(sepAdmin) };
-			sepAdmin.fMask = MIIM_FTYPE;
-			sepAdmin.fType = MFT_SEPARATOR;
-			InsertMenuItem(ctxMenu, -1, TRUE, &sepAdmin);
+			InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_RUN_AS_ADMIN, S.run_as_admin, bmpShield);
+			InsertCtxMenuSeparator(ctxMenu);
 		}
 
 		if (!isRoot) {
-			MENUITEMINFO mii{ sizeof(mii) };
-			mii.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-			mii.dwTypeData = (LPWSTR)S.open_shortcut_location;
-			mii.wID = WM_CTX_OPEN_SHORTCUT_LOCATION;
-			mii.hbmpItem = bmpOpenFolder;
-			InsertMenuItem(ctxMenu, -1, TRUE, &mii);
+			InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_SHORTCUT_LOCATION, S.open_shortcut_location, bmpOpenFolder);
 		}
 
-		MENUITEMINFO mii2{ sizeof(mii2) };
-		mii2.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii2.dwTypeData = (LPWSTR)S.open_menu_folder;
-		mii2.wID = WM_CTX_OPEN_MENU_FOLDER;
-		mii2.hbmpItem = bmpFolder;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii2);
-
-		MENUITEMINFO mii3{ sizeof(mii3) };
-		mii3.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii3.dwTypeData = (LPWSTR)S.open_stacky_folder;
-		mii3.wID = WM_CTX_OPEN_STACKY_FOLDER;
-		mii3.hbmpItem = bmpStacky;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii3);
-
-		MENUITEMINFO sep{ sizeof(sep) };
-		sep.fMask = MIIM_FTYPE;
-		sep.fType = MFT_SEPARATOR;
-		InsertMenuItem(ctxMenu, -1, TRUE, &sep);
-
-		MENUITEMINFO miiSettings{ sizeof(miiSettings) };
-		miiSettings.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		miiSettings.dwTypeData = (LPWSTR)S.settings;
-		miiSettings.wID = WM_CTX_OPEN_SETTINGS;
-		miiSettings.hbmpItem = bmpSettings;
-		InsertMenuItem(ctxMenu, -1, TRUE, &miiSettings);
-
-		MENUITEMINFO sep2{ sizeof(sep2) };
-		sep2.fMask = MIIM_FTYPE;
-		sep2.fType = MFT_SEPARATOR;
-		InsertMenuItem(ctxMenu, -1, TRUE, &sep2);
-
-		MENUITEMINFO mii4{ sizeof(mii4) };
-		mii4.fMask = MIIM_STRING | MIIM_ID | MIIM_BITMAP;
-		mii4.dwTypeData = (LPWSTR)S.close_menu;
-		mii4.wID = WM_CTX_CLOSE_MENU;
-		mii4.hbmpItem = bmpCross;
-		InsertMenuItem(ctxMenu, -1, TRUE, &mii4);
-
-		Util::EnableDarkContextMenu(dark_mode);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_MENU_FOLDER, S.open_menu_folder, bmpFolder);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_STACKY_FOLDER, S.open_stacky_folder, bmpStacky);
+		InsertCtxMenuSeparator(ctxMenu);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_OPEN_SETTINGS, S.settings, bmpSettings);
+		InsertCtxMenuSeparator(ctxMenu);
+		InsertCtxMenuItem(ctxMenu, ctxEntries, WM_CTX_CLOSE_MENU, S.close_menu, bmpCross);
 
 		POINT pt{}; GetCursorPos(&pt);
 		SetForegroundWindow(owner);
 		UINT cmd = (UINT)TrackPopupMenuEx(ctxMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, owner, nullptr);
 		PostMessage(owner, WM_NULL, 0, 0); // needed so the menu dismisses correctly on some Windows versions
-
-		Util::EnableDarkContextMenu(false);
 
 		// Restore foreground/focus to the root popup/grid window (walking up through
 		// hover-child/submenu parents if needed) so it correctly receives WM_KILLFOCUS
@@ -2795,6 +2804,8 @@ struct App {
 		RestoreFocusToRootMenuWindow(owner);
 
 		DestroyMenu(ctxMenu);
+		DeleteObject(ctxBgBrush);
+		for (auto* e : ctxEntries) delete e;
 		if (bmpOpenFolder) DeleteObject(bmpOpenFolder);
 		if (bmpFolder)     DeleteObject(bmpFolder);
 		if (bmpStacky)     DeleteObject(bmpStacky);
@@ -2850,19 +2861,25 @@ struct App {
 	IconCache icon_cache;
 	bool      dark_mode;
 	ThemeMode theme_mode = THEME_SYSTEM;
+	int       custom_theme_index = -1; // THEME_CUSTOM only: index into kCustomThemeColors
 	GridMode  grid_mode;
 	int       icon_cols;
 	bool      mini_mode; // --mini: force 16px icons for every menu/submenu
 	bool      single_submenu_mode; // --singlesubmenu: root menu identical to default, submenus become
 									// flat icon-grids (no nested submenus) with per-folder layout variants
-	bool      folders_first; // --foldersfirst: .submenu folders listed before plain shortcuts, alphabetically within each group	// Effective selection/highlight color: system accent when following the
+	bool      folders_first; // --foldersfirst: .submenu folders listed before plain shortcuts, alphabetically within each group
+	bool      split_names_below = false; // GRID_SPLIT only: show item names below each icon within a section
+	bool      split_names_right = false; // GRID_SPLIT only: show item names to the right of each icon within a section
+	// Effective selection/highlight color: system accent when following the
 	// system theme, otherwise the fixed dark/light selection colors already
 	// used elsewhere. Accent is only read once (cached in g_sysTheme) and
 	// refreshed on system change notifications.
 	// --light-mode ignores the Windows accent color entirely and always uses
 	// the fixed hover color #E5E5E5.
 	COLORREF SelectionColor() const {
-		if (theme_mode == THEME_LIGHT) return RGB(0xE5, 0xE5, 0xE5);
+		if (theme_mode == THEME_CUSTOM && custom_theme_index >= 0 && custom_theme_index < 9)
+			return kCustomThemeColors[custom_theme_index].accent;
+		if (theme_mode == THEME_LIGHT) return RGB(0xE0, 0xE0, 0xE0);
 		if (theme_mode == THEME_SYSTEM) return GetSystemTheme().accent;
 		return dark_mode ? RGB(64, 64, 64) : GetSysColor(COLOR_HIGHLIGHT);
 	}
@@ -2870,6 +2887,8 @@ struct App {
 	// Effective menu/submenu background color. --light-mode always uses the
 	// fixed color #F9F9F9 instead of the system menu color.
 	COLORREF BackgroundColor() const {
+		if (theme_mode == THEME_CUSTOM && custom_theme_index >= 0 && custom_theme_index < 9)
+			return kCustomThemeColors[custom_theme_index].background;
 		if (theme_mode == THEME_LIGHT) return RGB(0xF9, 0xF9, 0xF9);
 		return dark_mode ? RGB(32, 32, 32) : GetSysColor(COLOR_MENU);
 	}
@@ -2879,6 +2898,7 @@ struct App {
 	// highlighted text must stay dark instead of using COLOR_HIGHLIGHTTEXT
 	// (typically white), otherwise it becomes invisible.
 	COLORREF SelectionTextColor() const {
+		if (theme_mode == THEME_CUSTOM) return RGB(0, 0, 0);
 		if (theme_mode == THEME_LIGHT) return RGB(0, 0, 0);
 		return dark_mode ? RGB(255, 255, 255) : GetSysColor(COLOR_HIGHLIGHTTEXT);
 	}
@@ -2999,7 +3019,11 @@ struct App {
 	// "AGREGAR SEPARADOR DE SUBMENÚS Y ACCESOS DIRECTOS SIMPLES" enabled in
 	// its .stacky-config, so a separator should be drawn automatically below
 	// the last submenu folder item, before the plain shortcut items.
+	// DOBLE COLUMNA (GRID_CASCADE/GRID_CASCADE_NAME) never supports this
+	// separator, regardless of what may be persisted in the config.
 	bool AddSeparatorEnabled(const String& prefix) const {
+		GridMode effMode = EffectiveGridMode(prefix);
+		if (effMode == GRID_CASCADE || effMode == GRID_CASCADE_NAME) return false;
 		String folder = prefix.empty() ? cache->base_dir : cache->path(Util::rtrim(prefix, DIR_SEP));
 		StackyFolderConfig cfg = StackyFolderConfig::Load(folder);
 		return cfg.loaded && cfg.add_separator;
@@ -3333,6 +3357,43 @@ public:
 				return v;
 			}
 
+	// GRID_SPLIT only: one section per root-level subfolder, each holding the
+	// indices of that subfolder's direct plain shortcuts (nested subfolders
+	// and separators inside it are hidden, per the mode's spec). Stray plain
+	// shortcuts/separators directly at the root are also hidden: the root may
+	// only contain subfolders in this mode. Section/item order follows the
+	// existing cache scan order, which already reflects alphabetical or
+	// %NN%-custom-prefix ordering (same as every other mode that doesn't
+	// explicitly reorder via --foldersfirst).
+	struct SplitSection {
+		size_t folderIdx;            // index into cache->items of the subfolder
+		std::vector<size_t> items;   // indices of its direct plain shortcuts
+	};
+	std::vector<SplitSection> SplitGridSections() const {
+		std::vector<SplitSection> result;
+		for (size_t i = 1; i < cache->items.size(); ++i) {
+			auto& ci = cache->items[i];
+			if (ci.name.find(DIR_SEP) != String::npos) continue; // root level only
+			if (IsSeparatorFile(ci.name)) continue;  // hide stray root separators
+			if (!ci.is_submenu) continue;            // hide stray root plain shortcuts
+			SplitSection sec;
+			sec.folderIdx = i;
+			String childPrefix = ci.name + DIR_SEP;
+			for (size_t j = 1; j < cache->items.size(); ++j) {
+				auto& cj = cache->items[j];
+				if (cj.name.rfind(childPrefix, 0) != 0) continue;
+				String rel = cj.name.substr(childPrefix.size());
+				if (rel.empty() || rel.find(DIR_SEP) != String::npos) continue; // direct children only
+				if (IsSeparatorFile(cj.name)) continue; // hide separators inside subfolder
+				if (cj.is_submenu) continue;            // hide nested subfolders inside subfolder
+				sec.items.push_back(j);
+			}
+			result.push_back(std::move(sec));
+		}
+		return result;
+	}
+
+
 	struct GridMetrics {
 		int cellSz;   // icon-area side = iconSz + cellPad*2
 		int cellW;    // actual column width used for x-stepping (== cellSz except for
@@ -3504,6 +3565,131 @@ public:
 		return { cellSz, cellW, cellPad, labelH, cellH, cols, rows, cellSz * cols, cellH * rows + topPad, f2Row1Count, topPad, subTwoCol };
 	}
 
+	// GRID_SPLIT only: layout info for one TITLE + separator + icon-grid
+	// section (one per root-level subfolder).
+	struct SplitSectionLayout {
+		size_t folderIdx;
+		std::vector<size_t> items;
+		int sectionY;   // top of this section (title's top), relative to window
+		int titleH;     // title text line height
+		int sepY;       // separator line y (relative to window)
+		int gridY;      // top of the icon grid (relative to window)
+		int cellSz, cellW, cellPad, labelH, cellH;
+		int cols, rows;
+		bool namesRight;
+	};
+	struct SplitGridLayout {
+		int totalW = 0, totalH = 0;
+		std::vector<SplitSectionLayout> sections;
+	};
+
+	// Measures the full GRID_SPLIT window: one section per root-level
+	// subfolder, each made of a bold left-aligned TITLE, an automatic
+	// separator spanning the window's width (matching a normal menu
+	// separator's look), and an icon grid of that subfolder's plain
+	// shortcuts (supporting mini icons and names below/right of the icon,
+	// same as GRID_ICON/GRID_NAME/GRID_NAME_RIGHT).
+	SplitGridLayout MeasureSplitGrid() const {
+		SplitGridLayout out;
+		UINT dpi = GetDpiForWindow(window);
+		int firstTopGap = MulDiv(8, dpi, 96); // between window top and the first title
+		int topGap    = MulDiv(4, dpi, 96);  // above each title, except the first
+		int titleGap  = MulDiv(4, dpi, 96);  // between title and separator
+		int sepAreaH  = 1;                   // separator stripe height (no extra gap above/below)
+		int afterSep  = MulDiv(8, dpi, 96);  // gap between separator and the icon grid
+		int bottomPad = MulDiv(8, dpi, 96);  // after the last section's grid
+		int sidePad   = MulDiv(8, dpi, 96);  // left/right window padding (titles/separator don't touch borders)
+
+		HDC hdc = GetDC(window);
+		LOGFONT lf{}; lf.lfHeight = -MulDiv(12, dpi, 96); lf.lfWeight = FW_BOLD;
+		wcscpy_s(lf.lfFaceName, L"Segoe UI");
+		HFONT titleFont = CreateFontIndirect(&lf);
+		HGDIOBJ oldF = SelectObject(hdc, titleFont);
+		TEXTMETRIC tm{}; GetTextMetrics(hdc, &tm);
+		int titleH = tm.tmHeight + tm.tmExternalLeading;
+
+		auto sections = SplitGridSections();
+		int y = 0;
+		int maxW = MulDiv(100, dpi, 96); // sane minimum window width
+		for (size_t si = 0; si < sections.size(); ++si) {
+			auto& sec = sections[si];
+			SplitSectionLayout layout{};
+			layout.folderIdx = sec.folderIdx;
+			layout.items = sec.items;
+
+			y += (si == 0) ? firstTopGap : topGap;
+			layout.sectionY = y;
+			layout.titleH = titleH;
+			y += titleH + titleGap;
+			layout.sepY = y;
+			y += sepAreaH + afterSep;
+			layout.gridY = y;
+
+			// Title width (bold font) -- contributes to overall window width.
+			String titleName = cache->items[sec.folderIdx].name;
+			titleName = Util::StripSortPrefix(Util::LastPathSegment(titleName));
+			titleName = Util::StripSubmenuSuffix(titleName);
+			SIZE ts{}; GetTextExtentPoint32(hdc, titleName.c_str(), (int)titleName.size(), &ts);
+			int titleW = sidePad * 2 + ts.cx;
+			if (titleW > maxW) maxW = titleW;
+
+			// Icon grid for this section's items, using the same per-cell
+			// metrics as GRID_ICON/GRID_NAME/GRID_NAME_RIGHT.
+			int iconSz  = MulDiv(IconPxFor(L""), dpi, 96);
+			int cellPad = MulDiv(8, dpi, 96);
+			int cellSz  = iconSz + cellPad * 2;
+			int cols = icon_cols; if (cols < 1) cols = 1;
+			int n = (int)sec.items.size();
+			int rows = n > 0 ? (n + cols - 1) / cols : 1;
+
+			String childPrefix = cache->items[sec.folderIdx].name + DIR_SEP;
+			int cellW = cellSz, cellH = cellSz, labelH = 0;
+			if (split_names_right) {
+				NONCLIENTMETRICS ncm{}; ncm.cbSize = sizeof(ncm);
+				SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+				ncm.lfMenuFont.lfWeight = FW_NORMAL;
+				HFONT nf = CreateFontIndirect(&ncm.lfMenuFont);
+				HGDIOBJ oldNf = SelectObject(hdc, nf);
+				int maxTextW = 0;
+				for (auto idx : sec.items) {
+					String disp = GridDisplayName(cache->items[idx].name, childPrefix);
+					SIZE tsz{}; GetTextExtentPoint32(hdc, disp.c_str(), (int)disp.size(), &tsz);
+					if (tsz.cx > maxTextW) maxTextW = tsz.cx;
+				}
+				SelectObject(hdc, oldNf); DeleteObject(nf);
+				int maxAllowed = MulDiv(200, dpi, 96);
+				int textW = (maxTextW > maxAllowed) ? maxAllowed : maxTextW;
+				int rightPad = MulDiv(8, dpi, 96);
+				cellW = cellSz + textW;
+				maxW = max(maxW, sidePad * 2 + cellW * cols + rightPad - cellPad);
+			} else if (split_names_below) {
+				labelH = MulDiv(16, dpi, 96);
+				cellH = cellSz + labelH;
+				maxW = max(maxW, sidePad * 2 + cellSz * cols);
+			} else {
+				maxW = max(maxW, sidePad * 2 + cellSz * cols);
+			}
+
+			layout.cellSz = cellSz; layout.cellW = cellW; layout.cellPad = cellPad;
+			layout.labelH = labelH; layout.cellH = cellH;
+			layout.cols = cols; layout.rows = rows;
+			layout.namesRight = split_names_right;
+
+			y += cellH * rows;
+			out.sections.push_back(layout);
+		}
+		y += bottomPad;
+
+		SelectObject(hdc, oldF);
+		DeleteObject(titleFont);
+		ReleaseDC(window, hdc);
+
+		out.totalW = maxW;
+		out.totalH = y > 0 ? y : MulDiv(40, dpi, 96);
+		return out;
+	}
+
+
 	// Create params passed to GridWndProc for both root and submenu grids.
 	struct GridCreateParams {
 		App*   app;
@@ -3512,14 +3698,17 @@ public:
 		int    openRight;  // +1=open submenus to the right, -1=left, 0=auto (root)
 	};
 
-	void ShowIconGridAt(int x, int y) {
+	void ShowIconGridAt(int x, int y, int w = 0, int h = 0) {
 		auto* cp = new GridCreateParams{ this, L"", nullptr, 0 };
-		auto gm  = MeasureGridSize();
+		if (w <= 0 || h <= 0) {
+			auto gm = MeasureGridSize();
+			w = gm.totalW; h = gm.totalH;
+		}
 		HWND grid = CreateWindowEx(
 			WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
 			STACKY_GRID_CLASS, L"",
 			WS_POPUP | WS_BORDER,
-			x, y, gm.totalW, gm.totalH,
+			x, y, w, h,
 			nullptr, nullptr, GetModuleHandle(nullptr), cp);
 		if (!grid) { delete cp; return; }
 		Util::SetWindowRoundedCorners(grid);
@@ -3842,6 +4031,26 @@ public:
 			return;
 		}
 
+		// Right-click context menu entries (tagged, see TagCtxItemData).
+		if (mis->itemData & 1) {
+			auto* ce = (CtxItemEntry*)(mis->itemData & ~(ULONG_PTR)1);
+			UINT dpi = GetDpiForWindow(window);
+			int icon = MulDiv(16, dpi, 96);
+			int pad = MulDiv(8, dpi, 96);
+
+			HDC hdc = GetDC(window);
+			HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+			HFONT old = (HFONT)SelectObject(hdc, font);
+			SIZE ts{};
+			GetTextExtentPoint32(hdc, ce->text.c_str(), (int)ce->text.size(), &ts);
+			SelectObject(hdc, old);
+			ReleaseDC(window, hdc);
+
+			mis->itemHeight = max((UINT)GetSystemMetrics(SM_CYMENU), (UINT)(icon + pad));
+			mis->itemWidth = icon + pad + ts.cx + pad;
+			return;
+		}
+
 		auto* e = (MenuEntry*)mis->itemData;
 		if (!e) return;
 
@@ -3875,6 +4084,51 @@ public:
 
 	void on_draw_item(DRAWITEMSTRUCT* dis) {
 		if (dis->CtlType != ODT_MENU) return;
+
+		// ----- RIGHT-CLICK CONTEXT MENU ENTRIES (tagged, see TagCtxItemData) -----
+		if (dis->itemData & 1) {
+			auto* ce = (CtxItemEntry*)(dis->itemData & ~(ULONG_PTR)1);
+			const bool sel = (dis->itemState & ODS_SELECTED) != 0;
+
+			const COLORREF bg = BackgroundColor();
+			const COLORREF fg = dark_mode ? RGB(240, 240, 240) : GetSysColor(COLOR_MENUTEXT);
+			const COLORREF selBg = SelectionColor();
+			const COLORREF selFg = SelectionTextColor();
+
+			HBRUSH hbr = CreateSolidBrush(sel ? selBg : bg);
+			FillRect(dis->hDC, &dis->rcItem, hbr);
+			DeleteObject(hbr);
+
+			if (ce && ce->bmp) {
+				BITMAP bm{};
+				GetObject(ce->bmp, sizeof(bm), &bm);
+				int x = dis->rcItem.left + 4;
+				int y = dis->rcItem.top + (dis->rcItem.bottom - dis->rcItem.top - bm.bmHeight) / 2;
+
+				HDC mem = CreateCompatibleDC(dis->hDC);
+				HGDIOBJ old = SelectObject(mem, ce->bmp);
+
+				BLENDFUNCTION bf{};
+				bf.BlendOp = AC_SRC_OVER;
+				bf.SourceConstantAlpha = 255;
+				bf.AlphaFormat = AC_SRC_ALPHA;
+
+				AlphaBlend(dis->hDC, x, y, bm.bmWidth, bm.bmHeight, mem, 0, 0, bm.bmWidth, bm.bmHeight, bf);
+
+				SelectObject(mem, old);
+				DeleteDC(mem);
+			}
+
+			RECT tr = dis->rcItem;
+			UINT dpi = GetDpiForWindow(window);
+			int icon = MulDiv(16, dpi, 96);
+			tr.left += icon + 8;
+
+			SetBkMode(dis->hDC, TRANSPARENT);
+			SetTextColor(dis->hDC, sel ? selFg : fg);
+			DrawText(dis->hDC, ce ? ce->text.c_str() : L"", -1, &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_END_ELLIPSIS);
+			return;
+		}
 
 		auto* e = (MenuEntry*)dis->itemData;
 		// ----- SEPARATOR DRAW -----
@@ -4090,6 +4344,19 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	}
 	case WM_ERASEBKGND:
 		return 1; // suppress � WM_PAINT fills every pixel with double-buffer
+	case WM_MEASUREITEM: {
+		// Right-click context menus (ShowSubfolderContextMenu/ShowShortcutContextMenu)
+		// are tracked with this window as owner, so the owner-draw measure/draw
+		// messages for their items arrive here instead of App::window_proc.
+		auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+		if (state && state->app) { state->app->on_measure_item((MEASUREITEMSTRUCT*)lParam); return TRUE; }
+		break;
+	}
+	case WM_DRAWITEM: {
+		auto* state = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+		if (state && state->app) { state->app->on_draw_item((DRAWITEMSTRUCT*)lParam); return TRUE; }
+		break;
+	}
 	case WM_NCDESTROY: {
 		auto* ps = (PopupState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 		if (ps) {
@@ -4687,6 +4954,10 @@ struct GridState {
     int       hotSubCell;   // cell index that opened subChild (-1 = none)
     bool      subClosePending;
     int       openRight;    // +1=open submenus to right, -1=left (inherited from root column)
+    // GRID_SPLIT only: pre-measured sections (TITLE + separator + icon grid),
+    // one per root-level subfolder. Cell hit-testing/painting iterates these
+    // instead of using the single-grid cellSz/cellW/cols/rows fields above.
+    std::vector<App::SplitSectionLayout> splitSections;
 };
 
 struct TipData {
@@ -4805,6 +5076,43 @@ static void GridCellPos(GridState* gs, int idx, int& col, int& row) {
     }
 }
 
+// GRID_SPLIT only: hit-test a point (window client coords) against the
+// pre-measured sections, returning the flat item index (index into the
+// concatenation of all sections' items, in order) and, via out-params,
+// the section index and the item's cell rect. Returns -1 if no hit.
+static int SplitHitTest(GridState* gs, POINT pt, int* outSection = nullptr, RECT* outCell = nullptr) {
+    int flat = 0;
+    for (size_t si = 0; si < gs->splitSections.size(); ++si) {
+        auto& sec = gs->splitSections[si];
+        int n = (int)sec.items.size();
+        for (int i = 0; i < n; ++i) {
+            int col = i % sec.cols;
+            int row = i / sec.cols;
+            int x = col * sec.cellW;
+            int y = sec.gridY + row * sec.cellH;
+            RECT cell = { x, y, x + sec.cellW, y + sec.cellH };
+            if (PtInRect(&cell, pt)) {
+                if (outSection) *outSection = (int)si;
+                if (outCell) *outCell = cell;
+                return flat + i;
+            }
+        }
+        flat += n;
+    }
+    return -1;
+}
+
+// GRID_SPLIT only: resolve a flat item index back to its cache->items index.
+static size_t SplitFlatToCacheIdx(GridState* gs, int flatIdx) {
+    int flat = 0;
+    for (auto& sec : gs->splitSections) {
+        int n = (int)sec.items.size();
+        if (flatIdx < flat + n) return sec.items[flatIdx - flat];
+        flat += n;
+    }
+    return 0;
+}
+
 // Helper: show or hide a tooltip for the grid
 static void GridShowTip(HWND hwnd, GridState* gs, int cellIdx) {
     if (gs->tipHwnd && IsWindow(gs->tipHwnd)) {
@@ -4813,11 +5121,32 @@ static void GridShowTip(HWND hwnd, GridState* gs, int cellIdx) {
     }
     if (cellIdx < 0) return;
 
-    auto items = gs->app->GridItems(gs->prefix);
-    if (cellIdx >= (int)items.size()) return;
-
-    auto& ci = gs->app->cache->items[items[cellIdx]];
-    String label = GridDisplayName(ci.name, gs->prefix);
+    String label;
+    int col = 0, row = 0, cellW = gs->cellW, cellH = gs->cellH, cellSz = gs->cellSz, topPad = gs->topPad;
+    if (gs->grid_mode == GRID_SPLIT) {
+        size_t cacheIdx = SplitFlatToCacheIdx(gs, cellIdx);
+        if (cacheIdx == 0 && gs->splitSections.empty()) return;
+        auto& ci = gs->app->cache->items[cacheIdx];
+        int flat = 0;
+        for (auto& sec : gs->splitSections) {
+            int n = (int)sec.items.size();
+            if (cellIdx < flat + n) {
+                int i = cellIdx - flat;
+                col = i % sec.cols; row = i / sec.cols;
+                cellW = sec.cellW; cellH = sec.cellH; cellSz = sec.cellSz; topPad = sec.gridY;
+                String childPrefix = gs->app->cache->items[sec.folderIdx].name + DIR_SEP;
+                label = GridDisplayName(ci.name, childPrefix);
+                break;
+            }
+            flat += n;
+        }
+    } else {
+        auto items = gs->app->GridItems(gs->prefix);
+        if (cellIdx >= (int)items.size()) return;
+        auto& ci = gs->app->cache->items[items[cellIdx]];
+        label = GridDisplayName(ci.name, gs->prefix);
+        GridCellPos(gs, cellIdx, col, row);
+    }
 
     HDC measDC = GetDC(hwnd);
     LOGFONT lf{}; lf.lfHeight = -12; lf.lfWeight = FW_NORMAL;
@@ -4828,13 +5157,11 @@ static void GridShowTip(HWND hwnd, GridState* gs, int cellIdx) {
     SelectObject(measDC, oldF); DeleteObject(fnt); ReleaseDC(hwnd, measDC);
 
     int tipW = ts.cx + 10, tipH = ts.cy + 6;
-    int col, row;
-    GridCellPos(gs, cellIdx, col, row);
     POINT origin = {0,0}; ClientToScreen(hwnd, &origin);
-    int tipX = origin.x + col * gs->cellW + gs->cellW/2 - tipW/2;
-    int tipY = origin.y + gs->topPad + row * gs->cellH - tipH - 2;
+    int tipX = origin.x + col * cellW + cellW/2 - tipW/2;
+    int tipY = origin.y + topPad + row * cellH - tipH - 2;
     // if above screen, place below icon
-    if (tipY < 0) tipY = origin.y + gs->topPad + row * gs->cellH + gs->cellSz + 2;
+    if (tipY < 0) tipY = origin.y + topPad + row * cellH + cellSz + 2;
 
     wcsncpy_s(g_tipData.label, label.c_str(), 511);
     g_tipData.dark = gs->dark_mode;
@@ -5044,8 +5371,30 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     case WM_CREATE: {
         auto* cs = (CREATESTRUCT*)lParam;
         auto* cp = (App::GridCreateParams*)cs->lpCreateParams;
-        auto  gm  = cp->app->MeasureGridSize(cp->prefix);
         GridMode effMode = cp->app->EffectiveGridMode(cp->prefix);
+        auto* gs  = new GridState{};
+        if (effMode == GRID_SPLIT) {
+            auto sg = cp->app->MeasureSplitGrid();
+            gs->app           = cp->app;
+            gs->prefix        = cp->prefix;
+            gs->parentHwnd    = cp->parentHwnd;
+            gs->grid_mode     = effMode;
+            gs->splitSections = sg.sections;
+            gs->subTwoCol     = false;
+            gs->iconPx        = cp->app->IconPxFor(L"");
+            gs->hotCell       = -1;
+            gs->tipHwnd       = nullptr;
+            gs->trackingMouse = false;
+            gs->dark_mode     = cp->app->dark_mode;
+            gs->subChild      = nullptr;
+            gs->hotSubCell    = -1;
+            gs->subClosePending = false;
+            gs->openRight     = cp->openRight;
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)gs);
+            delete cp;
+            return 0;
+        }
+        auto  gm  = cp->app->MeasureGridSize(cp->prefix);
         // For GRID_CASCADE/GRID_CASCADE_NAME sub-grids use gm.cols whenever it computed
         // a multi-column layout (subTwoCol, or an all-plain-items submenu now laid out
         // as 2 columns); otherwise force 1 column. GRID_F2 and GRID_SS_* sub-grids always use gm.cols.
@@ -5053,7 +5402,6 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     effMode == GRID_SS_ICON || effMode == GRID_SS_NAME_RIGHT || effMode == GRID_SS_NAME_BELOW ||
                     effMode == GRID_NAME_RIGHT ||
                     gm.cols > 1) ? gm.cols : 1;
-        auto* gs  = new GridState{};
         gs->app           = cp->app;
         gs->prefix        = cp->prefix;
         gs->parentHwnd    = cp->parentHwnd;
@@ -5092,6 +5440,19 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             gs->dark_mode      = gs->app->dark_mode;
             InvalidateRect(hwnd, nullptr, FALSE);
         }
+        break;
+    }
+    case WM_MEASUREITEM: {
+        // Right-click context menus are tracked with this window as owner, so
+        // the owner-draw measure/draw messages for their items arrive here
+        // instead of App::window_proc.
+        auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        if (gs && gs->app) { gs->app->on_measure_item((MEASUREITEMSTRUCT*)lParam); return TRUE; }
+        break;
+    }
+    case WM_DRAWITEM: {
+        auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+        if (gs && gs->app) { gs->app->on_draw_item((DRAWITEMSTRUCT*)lParam); return TRUE; }
         break;
     }
     case WM_DESTROY: {
@@ -5151,6 +5512,135 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         HBRUSH bgBr = CreateSolidBrush(gridBg);
         FillRect(memDC, &rc, bgBr); DeleteObject(bgBr);
 
+        if (gs->grid_mode == GRID_SPLIT) {
+            UINT dpi = GetDpiForWindow(hwnd);
+            int iSz  = MulDiv(gs->iconPx, dpi, 96);
+            int iPad = MulDiv(8, dpi, 96);
+            int sidePad = MulDiv(8, dpi, 96);
+
+            LOGFONT tlf{}; tlf.lfHeight = -MulDiv(12, dpi, 96); tlf.lfWeight = FW_BOLD;
+            wcscpy_s(tlf.lfFaceName, L"Segoe UI");
+            HFONT titleFnt = CreateFontIndirect(&tlf);
+
+            HFONT nameBelowFnt = nullptr;
+            HFONT nameRightFnt = nullptr;
+            if (gs->app->split_names_below) {
+                LOGFONT lf{}; lf.lfHeight = -MulDiv(9, dpi, 96); lf.lfWeight = FW_NORMAL;
+                wcscpy_s(lf.lfFaceName, L"Segoe UI");
+                nameBelowFnt = CreateFontIndirect(&lf);
+            }
+            if (gs->app->split_names_right) {
+                NONCLIENTMETRICS ncm{}; ncm.cbSize = sizeof(ncm);
+                SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+                ncm.lfMenuFont.lfWeight = FW_NORMAL;
+                nameRightFnt = CreateFontIndirect(&ncm.lfMenuFont);
+            }
+
+            COLORREF sepClr = dm ? RGB(70,70,70) : GetSysColor(COLOR_3DSHADOW);
+
+            int flat = 0;
+            for (auto& sec : gs->splitSections) {
+                // Title (bold, left-aligned)
+                String titleName = gs->app->cache->items[sec.folderIdx].name;
+                titleName = Util::StripSortPrefix(Util::LastPathSegment(titleName));
+                titleName = Util::StripSubmenuSuffix(titleName);
+                HFONT oldTF = (HFONT)SelectObject(memDC, titleFnt);
+                SetTextColor(memDC, sepClr);
+                SetBkMode(memDC, TRANSPARENT);
+                RECT tr = { sidePad, sec.sectionY, rc.right - sidePad, sec.sectionY + sec.titleH };
+                DrawText(memDC, titleName.c_str(), -1, &tr, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                SelectObject(memDC, oldTF);
+
+                // Separator spanning the window width, not touching the borders.
+                HPEN sepPen = CreatePen(PS_SOLID, 1, sepClr);
+                HGDIOBJ oldPen = SelectObject(memDC, sepPen);
+                MoveToEx(memDC, sidePad, sec.sepY, nullptr);
+                LineTo(memDC, rc.right - sidePad, sec.sepY);
+                SelectObject(memDC, oldPen); DeleteObject(sepPen);
+
+                // Icon grid for this section.
+                String childPrefix = gs->app->cache->items[sec.folderIdx].name + DIR_SEP;
+                int n = (int)sec.items.size();
+                for (int i = 0; i < n; ++i) {
+                    int col = i % sec.cols;
+                    int row = i / sec.cols;
+                    int x = col * sec.cellW;
+                    int y = sec.gridY + row * sec.cellH;
+                    RECT cell = { x, y, x + sec.cellW, y + sec.cellH };
+
+                    int flatIdx = flat + i;
+                    if (flatIdx == gs->hotCell) {
+                        HBRUSH hlBr = CreateSolidBrush(gridHov);
+                        FillRect(memDC, &cell, hlBr); DeleteObject(hlBr);
+                    }
+
+                    auto& ci = gs->app->cache->items[sec.items[i]];
+                    auto& ic = gs->app->icon_cache.get(hwnd, ci.bmp.hBmp, gs->app->IconPxFor(L""));
+                    HDC tmpDC = CreateCompatibleDC(memDC);
+                    HGDIOBJ oldTmp = SelectObject(tmpDC, ic.bmp);
+                    BLENDFUNCTION bf{}; bf.BlendOp = AC_SRC_OVER; bf.SourceConstantAlpha = 255; bf.AlphaFormat = AC_SRC_ALPHA;
+                    int iconX, iconY;
+                    if (sec.namesRight) {
+                        iconX = x + iPad;
+                        iconY = y + (sec.cellH - iSz) / 2;
+                    } else if (gs->app->split_names_below) {
+                        iconX = x + (sec.cellW - iSz) / 2;
+                        iconY = y + sec.cellPad;
+                    } else {
+                        iconX = x + iPad;
+                        iconY = y + iPad;
+                    }
+                    AlphaBlend(memDC, iconX, iconY, iSz, iSz, tmpDC, 0, 0, ic.srcSz.cx, ic.srcSz.cy, bf);
+                    SelectObject(tmpDC, oldTmp); DeleteDC(tmpDC);
+
+                    String disp = GridDisplayName(ci.name, childPrefix);
+                    if (sec.namesRight && nameRightFnt) {
+                        HFONT oldF = (HFONT)SelectObject(memDC, nameRightFnt);
+                        SetTextColor(memDC, (flatIdx == gs->hotCell) ? labelFgSel : labelFg);
+                        SetBkMode(memDC, TRANSPARENT);
+                        RECT lr = { x + sec.cellSz, y, x + sec.cellW, y + sec.cellH };
+                        int availW = lr.right - lr.left;
+                        String truncated = disp;
+                        SIZE ts2{};
+                        GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                        while (!truncated.empty() && ts2.cx > availW) {
+                            truncated.pop_back();
+                            GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                        }
+                        DrawText(memDC, truncated.c_str(), -1, &lr, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        SelectObject(memDC, oldF);
+                    } else if (gs->app->split_names_below && sec.labelH > 0 && nameBelowFnt) {
+                        HFONT oldF = (HFONT)SelectObject(memDC, nameBelowFnt);
+                        SetTextColor(memDC, (flatIdx == gs->hotCell) ? labelFgSel : labelFg);
+                        SetBkMode(memDC, TRANSPARENT);
+                        SIZE aSz{}; GetTextExtentPoint32(memDC, L"a", 1, &aSz);
+                        int margin = aSz.cx;
+                        RECT lr = { x + margin, y + sec.cellSz - iPad, x + sec.cellW - margin, y + sec.cellH };
+                        int availW = lr.right - lr.left;
+                        String truncated = disp;
+                        SIZE ts2{};
+                        GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                        while (!truncated.empty() && ts2.cx > availW) {
+                            truncated.pop_back();
+                            GetTextExtentPoint32(memDC, truncated.c_str(), (int)truncated.size(), &ts2);
+                        }
+                        DrawText(memDC, truncated.c_str(), -1, &lr, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        SelectObject(memDC, oldF);
+                    }
+                }
+                flat += n;
+            }
+
+            if (titleFnt) DeleteObject(titleFnt);
+            if (nameBelowFnt) DeleteObject(nameBelowFnt);
+            if (nameRightFnt) DeleteObject(nameRightFnt);
+
+            BitBlt(dc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
+            SelectObject(memDC, oldBmp); DeleteObject(memBmp); DeleteDC(memDC);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
         auto items = gs->app->GridItems(gs->prefix);
         int  sz    = gs->cellSz;
         int  cW    = gs->cellW;
@@ -5161,15 +5651,15 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
         // Prepare label font (used for GRID_NAME and also submenu arrow)
         HFONT labelFnt = nullptr;
-        if (gs->grid_mode == GRID_NAME || gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2_NAME) {
+        if (gs->grid_mode == GRID_NAME || gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2_NAME || gs->grid_mode == GRID_SS_NAME_BELOW) {
             LOGFONT lf{}; lf.lfHeight = -MulDiv(9, dpi, 96); lf.lfWeight = FW_NORMAL;
             wcscpy_s(lf.lfFaceName, L"Segoe UI");
             labelFnt = CreateFontIndirect(&lf);
         }
-        // Main-menu font, used for GRID_SS_NAME_RIGHT / GRID_SS_NAME_BELOW / GRID_NAME_RIGHT item names
+        // Main-menu font, used for GRID_SS_NAME_RIGHT / GRID_NAME_RIGHT item names
         // (per spec: same font/size as the main menu).
         HFONT mainMenuFnt = nullptr;
-        if (gs->grid_mode == GRID_SS_NAME_RIGHT || gs->grid_mode == GRID_SS_NAME_BELOW || gs->grid_mode == GRID_NAME_RIGHT) {
+        if (gs->grid_mode == GRID_SS_NAME_RIGHT || gs->grid_mode == GRID_NAME_RIGHT) {
             NONCLIENTMETRICS ncm{}; ncm.cbSize = sizeof(ncm);
             SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
             ncm.lfMenuFont.lfWeight = FW_NORMAL;
@@ -5260,9 +5750,9 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             // draw name below the icon (--singlesubmenu GRID_SS_NAME_BELOW variant):
             // single centered line, allowed to extend up to 16px into the empty
             // space between icons on either side, truncated (no ellipsis) if still too long.
-            if (gs->grid_mode == GRID_SS_NAME_BELOW && gs->labelH > 0 && mainMenuFnt) {
+            if (gs->grid_mode == GRID_SS_NAME_BELOW && gs->labelH > 0 && labelFnt) {
                 String disp = GridDisplayName(ci.name, gs->prefix);
-                HFONT oldF = (HFONT)SelectObject(memDC, mainMenuFnt);
+                HFONT oldF = (HFONT)SelectObject(memDC, labelFnt);
                 SetTextColor(memDC, (i == gs->hotCell) ? labelFgSel : labelFg);
                 SetBkMode(memDC, TRANSPARENT);
                 int extend = MulDiv(16, dpi, 96);
@@ -5361,14 +5851,18 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         }
 
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-        auto items = gs->app->GridItems(gs->prefix);
         int newHot = -1;
-        for (int i = 0; i < (int)items.size(); ++i) {
-            int col, row;
-            GridCellPos(gs, i, col, row);
-            RECT cell = { col*gs->cellW, gs->topPad + row*gs->cellH,
-                          col*gs->cellW + gs->cellW, gs->topPad + row*gs->cellH + gs->cellH };
-            if (PtInRect(&cell, pt)) { newHot = i; break; }
+        if (gs->grid_mode == GRID_SPLIT) {
+            newHot = SplitHitTest(gs, pt);
+        } else {
+            auto items = gs->app->GridItems(gs->prefix);
+            for (int i = 0; i < (int)items.size(); ++i) {
+                int col, row;
+                GridCellPos(gs, i, col, row);
+                RECT cell = { col*gs->cellW, gs->topPad + row*gs->cellH,
+                              col*gs->cellW + gs->cellW, gs->topPad + row*gs->cellH + gs->cellH };
+                if (PtInRect(&cell, pt)) { newHot = i; break; }
+            }
         }
 
         if (newHot != gs->hotCell) {
@@ -5383,8 +5877,9 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
             if (newHot >= 0) {
                 bool isSubmenu = (gs->grid_mode == GRID_CASCADE || gs->grid_mode == GRID_CASCADE_NAME || gs->grid_mode == GRID_F2 || gs->grid_mode == GRID_F2_NAME) &&
-                    newHot < (int)items.size() &&
-                    gs->app->cache->items[items[newHot]].is_submenu;
+                    gs->grid_mode != GRID_SPLIT &&
+                    newHot < (int)gs->app->GridItems(gs->prefix).size() &&
+                    gs->app->cache->items[gs->app->GridItems(gs->prefix)[newHot]].is_submenu;
 
                 // 500 ms delay before showing tooltip for all modes
                 SetTimer(hwnd, GRID_TIMER_SHOW, 1000, nullptr);
@@ -5480,6 +5975,25 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
         if (!gs) break;
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (gs->grid_mode == GRID_SPLIT) {
+            int flatIdx = SplitHitTest(gs, pt);
+            if (flatIdx >= 0) {
+                size_t cacheIdx = SplitFlatToCacheIdx(gs, flatIdx);
+                auto& ci = gs->app->cache->items[cacheIdx];
+                String cmd = gs->app->cache->path(ci.name);
+                ShellExecute(nullptr, nullptr, cmd.c_str(), nullptr, nullptr, SW_NORMAL);
+                Util::RegisterRecentLaunch(cmd);
+                {
+                    String web_url = Util::GetWebUrl(cmd);
+                    if (!web_url.empty() && !Util::HasCustomIcon(cmd))
+                        Util::TriggerFaviconDownloadAsync(gs->app->cache->base_dir, ci.name, web_url, gs->app->cache->cache_path, cmd);
+                }
+                PostMessage(hwnd, WM_CLOSE, 0, 0);
+                return 0;
+            }
+            PostMessage(hwnd, WM_CLOSE, 0, 0);
+            return 0;
+        }
         auto items = gs->app->GridItems(gs->prefix);
         for (int i = 0; i < (int)items.size(); ++i) {
             int col, row;
@@ -5526,6 +6040,16 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         auto* gs = (GridState*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
         if (!gs) break;
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        if (gs->grid_mode == GRID_SPLIT) {
+            int flatIdx = SplitHitTest(gs, pt);
+            if (flatIdx >= 0) {
+                size_t cacheIdx = SplitFlatToCacheIdx(gs, flatIdx);
+                auto& ci = gs->app->cache->items[cacheIdx];
+                String shortcut_path = gs->app->cache->path(ci.name);
+                gs->app->ShowShortcutContextMenu(hwnd, shortcut_path, true);
+            }
+            return 0;
+        }
         auto items = gs->app->GridItems(gs->prefix);
         for (int i = 0; i < (int)items.size(); ++i) {
             int col, row;
