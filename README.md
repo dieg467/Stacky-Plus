@@ -33,7 +33,7 @@ There are 6 possible menu modes:<br>
 As many as you want, and in any of the modes. Each one will have its own dedicated button on the taskbar.
 
 ## Download
-The stacky-plus.exe file is 614 kB in size and can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/V-3.0
+The stacky-plus.exe file is 614 kB in size and can be downloaded from https://github.com/dieg467/Stacky-Plus/releases/tag/V-4.0
 This application downloads as an .exe file, but it does not require installation.
 
 ## Why is it so fast?
