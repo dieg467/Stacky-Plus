@@ -114,4 +114,3 @@ All modifications to a menu or submenu can be made from the Configuration window
 
 ## Original Source
 This project is based on the original project by Pawel Turlejski (https://github.com/pawelt/stacky)—which is no longer maintained—and on the fork by Clau-Bucur (https://github.com/clau-bucur/stacky). Modifications and new features have been implemented using artificial intelligence.
-
