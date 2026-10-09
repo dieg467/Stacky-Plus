@@ -155,18 +155,21 @@ enum ThemeMode {
 
 // Fixed accent (pointer-hover) and background colors for each of the nine
 // custom menu color presets offered in the Configuration window. Indexed by
-// (StackyConfigTheme value - SCFG_THEME_SKYBLUE).
-struct CustomThemeColors { COLORREF accent; COLORREF background; };
+// (StackyConfigTheme value - SCFG_THEME_SKYBLUE). titleAccent is a separate,
+// more saturated/visible color used only for GRID_SPLIT section TITLEs and
+// separators when "TITULO CON COLOR DE ENFASIS" is enabled (the accent color
+// itself is tuned for subtle hover highlighting and is too faint for text).
+struct CustomThemeColors { COLORREF accent; COLORREF background; COLORREF titleAccent; };
 static const CustomThemeColors kCustomThemeColors[9] = {
-	{ RGB(0xC3, 0xD6, 0xE0), RGB(0xEC, 0xEF, 0xF4) }, // CELESTE
-	{ RGB(0xA9, 0xD6, 0xB2), RGB(0xD2, 0xE9, 0xD7) }, // VERDE
-	{ RGB(0xF9, 0xB5, 0x66), RGB(0xFC, 0xDE, 0xBA) }, // NARANJA
-	{ RGB(0xC0, 0xAE, 0xDE), RGB(0xE8, 0xDF, 0xF4) }, // VIOLETA
-	{ RGB(0xED, 0xB1, 0xC8), RGB(0xF8, 0xD9, 0xDE) }, // ROSA
-	{ RGB(0xFF, 0x72, 0x80), RGB(0xFF, 0xC6, 0xC9) }, // ROJO
-	{ RGB(0xEF, 0xCF, 0x6A), RGB(0xFF, 0xF7, 0xD1) }, // AMARILLO
-	{ RGB(0xDD, 0xB9, 0x96), RGB(0xF2, 0xDA, 0xC6) }, // MARRÓN
-	{ RGB(0x7B, 0xB5, 0xE3), RGB(0xCE, 0xD6, 0xFF) }, // AZUL
+	{ RGB(0x94, 0xC5, 0xDD), RGB(0xEC, 0xEF, 0xF4), RGB(0x43, 0xAB, 0xDB) }, // CELESTE
+	{ RGB(0x68, 0xD1, 0x7B), RGB(0xD2, 0xE9, 0xD7), RGB(0x00, 0xBC, 0x1F) }, // VERDE
+	{ RGB(0xF9, 0xB5, 0x66), RGB(0xFC, 0xDE, 0xBA), RGB(0xF7, 0x90, 0x1B) }, // NARANJA
+	{ RGB(0xC0, 0xAE, 0xDE), RGB(0xE8, 0xDF, 0xF4), RGB(0x9A, 0x73, 0xDD) }, // VIOLETA
+	{ RGB(0xEA, 0x98, 0xB7), RGB(0xF8, 0xD9, 0xDE), RGB(0xE8, 0x58, 0x8F) }, // ROSA
+	{ RGB(0xFF, 0x4A, 0x46), RGB(0xFF, 0xC6, 0xC9), RGB(0xFF, 0x26, 0x26) }, // ROJO
+	{ RGB(0xEF, 0xCF, 0x6A), RGB(0xFF, 0xF7, 0xD1), RGB(0xEA, 0xC3, 0x00) }, // AMARILLO
+	{ RGB(0xDB, 0xAB, 0x7F), RGB(0xF2, 0xDA, 0xC6), RGB(0xB7, 0x75, 0x3A) }, // MARRÓN
+	{ RGB(0x5F, 0xA9, 0xE2), RGB(0xCE, 0xD6, 0xFF), RGB(0x11, 0x85, 0xDD) }, // AZUL
 };
 
 // Timer IDs used by PopupWndProc
@@ -213,7 +216,15 @@ struct PopupState {
 	DWORD  lastMoveTick = 0;
 };
 
-// Hook procedure to intercept menu window creation
+// Hook procedure to intercept menu window creation.
+//
+// NOTE on "BORDE DEL MENU" (menu_border / App::MenuBorderColor): this hook
+// only controls the native right-click context menu (a plain HMENU shown via
+// TrackPopupMenuEx). That native menu already gets Windows 11 DWM rounded
+// corners below, but its border/frame color is drawn entirely by the OS and
+// cannot be recolored without replacing it with a custom owner-drawn popup
+// window (the same approach already used for Stacky's own menus/submenus/
+// split-grid, which is why the "menu border" option only applies to those).
 LRESULT CALLBACK MenuWindowHook(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (nCode == HCBT_CREATEWND) {
 		CBT_CREATEWND* pCreateWnd = (CBT_CREATEWND*)lParam;
@@ -689,8 +700,16 @@ struct Util {
 		return mi.rcWork;
 	}
 
-	// Set rounded corners on window (Windows 11 style)
-	static void SetWindowRoundedCorners(HWND hwnd) {
+	// Set rounded corners on window (Windows 11 style), and optionally the
+	// DWM-drawn window border color/visibility ("BORDE DEL MENU" feature).
+	//
+	// IMPORTANT: on Windows 11, DWM paints its own thin accent border around
+	// top-level windows regardless of the WS_BORDER style bit, so simply
+	// removing WS_BORDER and painting our own rounded outline inside the
+	// client area (see PaintAntialiasedRoundedBorder) is NOT enough — the
+	// DWM-drawn border is layered on top of everything and always shows the
+	// system default color unless DWMWA_BORDER_COLOR is set explicitly here.
+	static void SetWindowRoundedCorners(HWND hwnd, COLORREF borderColor = CLR_INVALID) {
 		if (!hwnd) return;
 
 		// DWMWA_CORNER_PREFERENCE: 2 = DWMWCP_ROUND (Windows 11+)
@@ -700,6 +719,11 @@ struct Util {
 
 		DWORD cornerPreference = DWMWCP_ROUND;
 		::DwmSetWindowAttribute(hwnd, DWMWA_CORNER_PREFERENCE, &cornerPreference, sizeof(cornerPreference));
+
+		const DWORD DWMWA_BORDER_COLOR = 34;
+		const COLORREF kDwmColorDefault = 0xFFFFFFFF; // DWMWA_COLOR_DEFAULT
+		COLORREF dwmColor = (borderColor == CLR_INVALID) ? kDwmColorDefault : borderColor;
+		::DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &dwmColor, sizeof(dwmColor));
 	}
 
 	// Get taskbar position and dimensions (always returns the PRIMARY monitor's
@@ -1365,17 +1389,26 @@ struct Util {
 
 	// True if the current user's UI language is Spanish (any variant: es-ES, es-MX, etc.).
 	static bool IsSpanishUILanguage() {
-		WCHAR name[LOCALE_NAME_MAX_LENGTH] = { 0 };
-		if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0) {
-			return _wcsnicmp(name, L"es", 2) == 0;
-		}
-		LANGID lang = ::GetUserDefaultUILanguage();
-		return PRIMARYLANGID(lang) == LANG_SPANISH;
+		return GetUILanguageCode() == L"es";
 	}
 
 	// Return the two-letter ISO 639-1 language code of the current user's UI language
 	// (e.g. L"en", L"es", L"fr"...), lowercase. Falls back to L"en" on failure.
+	//
+	// Uses GetUserPreferredUILanguages (MUI_LANGUAGE_NAME), which reflects the
+	// Windows display language actually chosen in Settings > Time & Language >
+	// Language, and NOT GetUserDefaultLocaleName/GetUserDefaultUILanguage,
+	// which reflect the regional format / locale and can stay unchanged (e.g.
+	// still es-ES) even after switching the Windows display language to
+	// English, causing the UI to appear "stuck" in the old language.
 	static String GetUILanguageCode() {
+		ULONG numLangs = 0;
+		WCHAR buf[LOCALE_NAME_MAX_LENGTH * 4] = { 0 };
+		ULONG bufLen = ARRAYSIZE(buf);
+		if (::GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &numLangs, buf, &bufLen) && numLangs > 0 && buf[0] && buf[1]) {
+			WCHAR code[3] = { (WCHAR)towlower(buf[0]), (WCHAR)towlower(buf[1]), 0 };
+			return String(code);
+		}
 		WCHAR name[LOCALE_NAME_MAX_LENGTH] = { 0 };
 		if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0 && name[0] && name[1]) {
 			WCHAR code[3] = { (WCHAR)towlower(name[0]), (WCHAR)towlower(name[1]), 0 };
@@ -2513,6 +2546,11 @@ struct App {
 			mini_mode = rootCfg.mini_icons;
 			single_submenu_mode = rootCfg.mode == SCFG_MODE_SINGLESUB;
 			folders_first = rootCfg.sort_mode == SCFG_SORT_FOLDERSFIRST;
+			// "SEPARADORES (Y TITULO) CON COLOR DE ENFASIS" also applies to
+			// "Lista con submenus"/"Submenu unico" (separators only there),
+			// not just SCFG_MODE_SPLITGRID, so it's read unconditionally here.
+			split_title_accent = rootCfg.split_title_accent;
+			menu_border = rootCfg.menu_border;
 
 			switch (rootCfg.mode) {
 			case SCFG_MODE_ICONGRID:
@@ -2537,6 +2575,8 @@ struct App {
 				grid_mode = GRID_SPLIT;
 				split_names_right = rootCfg.grid_names_right;
 				split_names_below = !rootCfg.grid_names_right && rootCfg.grid_names_below;
+				split_title_weight = rootCfg.split_title_weight;
+				split_title_fill = rootCfg.split_title_fill;
 				break;
 			default:
 				grid_mode = GRID_NONE;
@@ -2870,6 +2910,20 @@ struct App {
 	bool      folders_first; // --foldersfirst: .submenu folders listed before plain shortcuts, alphabetically within each group
 	bool      split_names_below = false; // GRID_SPLIT only: show item names below each icon within a section
 	bool      split_names_right = false; // GRID_SPLIT only: show item names to the right of each icon within a section
+	StackyTitleWeight split_title_weight = SCFG_TITLE_WEIGHT_BOLD; // GRID_SPLIT only: section TITLE font weight
+	bool split_title_accent = false; // GRID_SPLIT only: TITLEs/separators use the accent/highlight color instead of the default gray
+	bool split_title_fill = false; // GRID_SPLIT only: TITLEs use the background color and get a rounded accent-colored fill
+	StackyMenuBorder menu_border = SCFG_MENU_BORDER_DEFAULT; // all modes: popup/grid/split-grid window border color ("BORDE DEL MENU")
+	// Maps split_title_weight to a Win32 LOGFONT weight value (used both when
+	// measuring and when painting the GRID_SPLIT section TITLEs, so they stay
+	// in sync).
+	LONG TitleFontWeight() const {
+		switch (split_title_weight) {
+		case SCFG_TITLE_WEIGHT_NORMAL:   return FW_NORMAL;
+		case SCFG_TITLE_WEIGHT_SEMIBOLD: return FW_BOLD;
+		default:                         return FW_SEMIBOLD;
+		}
+	}
 	// Effective selection/highlight color: system accent when following the
 	// system theme, otherwise the fixed dark/light selection colors already
 	// used elsewhere. Accent is only read once (cached in g_sysTheme) and
@@ -2879,9 +2933,22 @@ struct App {
 	COLORREF SelectionColor() const {
 		if (theme_mode == THEME_CUSTOM && custom_theme_index >= 0 && custom_theme_index < 9)
 			return kCustomThemeColors[custom_theme_index].accent;
-		if (theme_mode == THEME_LIGHT) return RGB(0xE0, 0xE0, 0xE0);
+		if (theme_mode == THEME_LIGHT) return RGB(0xCC, 0xCC, 0xCC);
 		if (theme_mode == THEME_SYSTEM) return GetSystemTheme().accent;
-		return dark_mode ? RGB(64, 64, 64) : GetSysColor(COLOR_HIGHLIGHT);
+		return dark_mode ? RGB(0x63, 0x63, 0x63) : GetSysColor(COLOR_HIGHLIGHT);
+	}
+
+	// Color used for GRID_SPLIT section TITLEs/separators when
+	// "TITULO CON COLOR DE ENFASIS" (split_title_accent) is enabled. Unlike
+	// SelectionColor() (tuned for subtle hover highlighting), this uses a
+	// separate, more saturated/visible color per COLOR DEL MENU preset so
+	// TITLEs stay legible; GRIS/NEGRO/System use fixed equivalents.
+	COLORREF TitleAccentColor() const {
+		if (theme_mode == THEME_CUSTOM && custom_theme_index >= 0 && custom_theme_index < 9)
+			return kCustomThemeColors[custom_theme_index].titleAccent;
+		if (theme_mode == THEME_LIGHT) return RGB(0x99, 0x99, 0x99);
+		if (theme_mode == THEME_SYSTEM) return GetSystemTheme().accent;
+		return dark_mode ? RGB(0x87, 0x87, 0x87) : GetSysColor(COLOR_HIGHLIGHT);
 	}
 
 	// Effective menu/submenu background color. --light-mode always uses the
@@ -2892,6 +2959,25 @@ struct App {
 		if (theme_mode == THEME_LIGHT) return RGB(0xF9, 0xF9, 0xF9);
 		return dark_mode ? RGB(32, 32, 32) : GetSysColor(COLOR_MENU);
 	}
+
+	// Color used to paint the rounded menu/submenu/split-grid window border
+	// when "BORDE DEL MENU" (menu_border) is not SCFG_MENU_BORDER_DEFAULT.
+	// SCFG_MENU_BORDER_ACCENT uses the hover/accent color; SCFG_MENU_BORDER_NONE
+	// uses the background color (making the border effectively invisible).
+	// SCFG_MENU_BORDER_DEFAULT is handled separately by keeping the native
+	// WS_BORDER/system-drawn frame and square corners.
+	COLORREF MenuBorderColor() const {
+		if (menu_border == SCFG_MENU_BORDER_NONE) return BackgroundColor();
+		return SelectionColor();
+	}
+
+	// Value to hand to Util::SetWindowRoundedCorners()'s DWM border-color
+	// parameter: CLR_INVALID (-> system default) for SCFG_MENU_BORDER_DEFAULT,
+	// otherwise MenuBorderColor().
+	COLORREF MenuBorderDwmColor() const {
+		return (menu_border == SCFG_MENU_BORDER_DEFAULT) ? CLR_INVALID : MenuBorderColor();
+	}
+
 
 	// Text color to use over the selection/hover background. --light-mode uses
 	// the fixed hover background (#E5E5E5) which is near-white, so the
@@ -3601,7 +3687,7 @@ public:
 		int sidePad   = MulDiv(8, dpi, 96);  // left/right window padding (titles/separator don't touch borders)
 
 		HDC hdc = GetDC(window);
-		LOGFONT lf{}; lf.lfHeight = -MulDiv(12, dpi, 96); lf.lfWeight = FW_BOLD;
+		LOGFONT lf{}; lf.lfHeight = -MulDiv(12, dpi, 96); lf.lfWeight = TitleFontWeight();
 		wcscpy_s(lf.lfFaceName, L"Segoe UI");
 		HFONT titleFont = CreateFontIndirect(&lf);
 		HGDIOBJ oldF = SelectObject(hdc, titleFont);
@@ -3707,11 +3793,11 @@ public:
 		HWND grid = CreateWindowEx(
 			WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
 			STACKY_GRID_CLASS, L"",
-			WS_POPUP | WS_BORDER,
+			WS_POPUP | (menu_border == SCFG_MENU_BORDER_DEFAULT ? WS_BORDER : 0),
 			x, y, w, h,
 			nullptr, nullptr, GetModuleHandle(nullptr), cp);
 		if (!grid) { delete cp; return; }
-		Util::SetWindowRoundedCorners(grid);
+		Util::SetWindowRoundedCorners(grid, MenuBorderDwmColor());
 		ShowWindow(grid, SW_SHOW);
 		SetForegroundWindow(grid);
 		SetFocus(grid);
@@ -3746,13 +3832,13 @@ public:
 			WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
 			STACKY_POPUP_CLASS,
 			L"",
-			WS_POPUP | WS_BORDER,
+			WS_POPUP | (menu_border == SCFG_MENU_BORDER_DEFAULT ? WS_BORDER : 0),
 			x, y, sz.w, sz.h,
 			nullptr, nullptr, GetModuleHandle(nullptr), state);
 
 		if (!popup) { delete state; return; }
 
-		Util::SetWindowRoundedCorners(popup);
+		Util::SetWindowRoundedCorners(popup, MenuBorderDwmColor());
 		ShowWindow(popup, SW_SHOW);
 		SetForegroundWindow(popup);
 		SetFocus(popup);
@@ -4134,7 +4220,9 @@ public:
 		// ----- SEPARATOR DRAW -----
 		if (!e) {
 			COLORREF bg = BackgroundColor();
-			COLORREF line = dark_mode ? RGB(70, 70, 70) : GetSysColor(COLOR_3DSHADOW);
+			COLORREF line = split_title_accent
+				? TitleAccentColor()
+				: (dark_mode ? RGB(70, 70, 70) : GetSysColor(COLOR_3DSHADOW));
 
 			// Fill background
 			HBRUSH b = CreateSolidBrush(bg);
@@ -4319,6 +4407,10 @@ static PopupLayout MakeLayout(HWND hwnd, int iconPx = NORMAL_ICON_PX) {
 	return l;
 }
 
+// Forward declaration; defined near PaintAntialiasedRoundedFill further down
+// (both reuse the same cached corner-tile technique).
+static void PaintAntialiasedRoundedBorder(HDC memDC, const RECT& r, int radius, int borderWidth, COLORREF color);
+
 LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	switch (msg) {
 	case WM_NCCREATE:
@@ -4410,7 +4502,7 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		COLORREF selColor   = app->SelectionColor();
 		COLORREF fgColor    = app->dark_mode ? RGB(240,240,240): GetSysColor(COLOR_MENUTEXT);
 		COLORREF fgSelColor = app->SelectionTextColor();
-		COLORREF sepColor   = app->dark_mode ? RGB(70,70,70)   : GetSysColor(COLOR_3DSHADOW);
+		COLORREF sepColor   = app->split_title_accent ? app->TitleAccentColor() : (app->dark_mode ? RGB(70,70,70)   : GetSysColor(COLOR_3DSHADOW));
 		COLORREF arrowColor = app->dark_mode ? RGB(200,200,200): RGB(0,0,0);
 
 		// Fill background
@@ -4545,6 +4637,13 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 		SelectObject(hdc_, oldFont);
 		DeleteObject(hMenuFont);
+
+		// Rounded "BORDE DEL MENU" border, if enabled (native WS_BORDER was
+		// omitted at window-creation time in that case; see ShowPopupWithPrefix).
+		if (app->menu_border != SCFG_MENU_BORDER_DEFAULT) {
+			UINT dpi = GetDpiForWindow(hwnd);
+			PaintAntialiasedRoundedBorder(hdc_, rc, MulDiv(8, dpi, 96), MulDiv(1, dpi, 96), app->MenuBorderColor());
+		}
 
 		// Blit the completed frame to the real DC in one shot (eliminates flicker)
 		BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
@@ -4720,12 +4819,12 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 						HWND child = CreateWindowEx(
 							WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
 							STACKY_GRID_CLASS, L"",
-							WS_POPUP | WS_BORDER,
+							WS_POPUP | (app->menu_border == SCFG_MENU_BORDER_DEFAULT ? WS_BORDER : 0),
 							cx, cy, gm.totalW, gm.totalH,
 							nullptr, nullptr, GetModuleHandle(nullptr), cp);
 
 						if (child) {
-							Util::SetWindowRoundedCorners(child);
+							Util::SetWindowRoundedCorners(child, app->MenuBorderDwmColor());
 							ShowWindow(child, SW_SHOWNOACTIVATE);
 							UpdateWindow(child);
 							state->childHwnd = child;
@@ -4754,12 +4853,12 @@ LRESULT CALLBACK PopupWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 					HWND child = CreateWindowEx(
 						WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
 						STACKY_POPUP_CLASS, L"",
-						WS_POPUP | WS_BORDER,
+						WS_POPUP | (app->menu_border == SCFG_MENU_BORDER_DEFAULT ? WS_BORDER : 0),
 						cx, cy, sz.w, sz.h,
 						nullptr, nullptr, GetModuleHandle(nullptr), childState);
 
 					if (child) {
-						Util::SetWindowRoundedCorners(child);
+						Util::SetWindowRoundedCorners(child, app->MenuBorderDwmColor());
 						ShowWindow(child, SW_SHOWNOACTIVATE);
 						UpdateWindow(child);
 						state->childHwnd = child;
@@ -5218,11 +5317,11 @@ static void GridOpenSubChild(HWND hwnd, GridState* gs, int cellIdx) {
         auto* cp = new App::GridCreateParams{ gs->app, childPrefix, hwnd, gs->openRight };
         HWND child = CreateWindowEx(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-            STACKY_GRID_CLASS, L"", WS_POPUP | WS_BORDER,
+            STACKY_GRID_CLASS, L"", WS_POPUP | (gs->app->menu_border == SCFG_MENU_BORDER_DEFAULT ? WS_BORDER : 0),
             subX, subY, gm.totalW, gm.totalH,
             nullptr, nullptr, GetModuleHandle(nullptr), cp);
         if (!child) { delete cp; return; }
-        Util::SetWindowRoundedCorners(child);
+        Util::SetWindowRoundedCorners(child, gs->app->MenuBorderDwmColor());
         ShowWindow(child, SW_SHOWNOACTIVATE);
         UpdateWindow(child);
         gs->subChild   = child;
@@ -5296,11 +5395,11 @@ static void GridOpenSubChild(HWND hwnd, GridState* gs, int cellIdx) {
     auto* cp = new App::GridCreateParams{ gs->app, childPrefix, hwnd, openRight };
     HWND child = CreateWindowEx(
         WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
-        STACKY_GRID_CLASS, L"", WS_POPUP | WS_BORDER,
+        STACKY_GRID_CLASS, L"", WS_POPUP | (gs->app->menu_border == SCFG_MENU_BORDER_DEFAULT ? WS_BORDER : 0),
         cx, cy, subW, subH,
         nullptr, nullptr, GetModuleHandle(nullptr), cp);
     if (!child) { delete cp; return; }
-    Util::SetWindowRoundedCorners(child);
+    Util::SetWindowRoundedCorners(child, gs->app->MenuBorderDwmColor());
     ShowWindow(child, SW_SHOWNOACTIVATE);
     UpdateWindow(child);
     gs->subChild   = child;
@@ -5361,6 +5460,267 @@ LRESULT CALLBACK TipWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+// ---------------------------------------------------------------------------
+// Antialiased rounded-corner fill cache (GRID_SPLIT "RELLENAR TITULO").
+// ---------------------------------------------------------------------------
+// Only the small quarter-circle corner tiles are pre-rendered with a real
+// alpha channel (coverage-based antialiasing) and cached by (radius, color).
+// The straight edges/middle of the rounded rect are filled with an ordinary
+// solid FillRect (already pixel-perfect, no AA needed), so repainting on
+// every WM_MOUSEMOVE hover-highlight pass only costs a few small cached
+// AlphaBlend calls instead of re-rasterizing the whole shape each time -
+// keeping menu/submenu open time and hover color transitions unaffected.
+struct CornerTileKey {
+    int radius;
+    COLORREF color;
+    bool operator==(const CornerTileKey& o) const { return radius == o.radius && color == o.color; }
+};
+struct CornerTileKeyHash {
+    size_t operator()(const CornerTileKey& k) const {
+        return (std::hash<int>()(k.radius) * 31) ^ std::hash<DWORD>()((DWORD)k.color);
+    }
+};
+// Index: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right.
+static std::unordered_map<CornerTileKey, HBITMAP, CornerTileKeyHash> g_cornerTileCache[4];
+
+static HBITMAP CreateCornerTileBitmap(int radius, COLORREF color, int cornerIdx) {
+    if (radius <= 0) return nullptr;
+    BITMAPINFO bmi = { 0 };
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = radius;
+    bmi.bmiHeader.biHeight      = -radius; // top-down
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bmp = ::CreateDIBSection(GetDC(nullptr), &bmi, DIB_RGB_COLORS, &bits, 0, 0);
+    if (!bmp || !bits) return nullptr;
+
+    BYTE cr = GetRValue(color), cg = GetGValue(color), cb = GetBValue(color);
+    const int ss = 4; // 4x4 supersampling for the quarter-circle edge
+    double cx = (cornerIdx == 0 || cornerIdx == 2) ? radius : 0; // circle center within the tile
+    double cy = (cornerIdx == 0 || cornerIdx == 1) ? radius : 0;
+    for (int y = 0; y < radius; ++y) {
+        BYTE* row = (BYTE*)bits + (size_t)y * radius * 4;
+        for (int x = 0; x < radius; ++x) {
+            int hits = 0;
+            for (int sy = 0; sy < ss; ++sy) {
+                double py = y + (sy + 0.5) / ss;
+                double dy = py - cy;
+                for (int sx = 0; sx < ss; ++sx) {
+                    double px = x + (sx + 0.5) / ss;
+                    double dx = px - cx;
+                    if (dx * dx + dy * dy <= (double)radius * radius) ++hits;
+                }
+            }
+            BYTE alpha = (BYTE)((hits * 255) / (ss * ss));
+            BYTE* px = row + (size_t)x * 4;
+            // Premultiplied BGRA, as required by AlphaBlend's AC_SRC_ALPHA.
+            px[0] = (BYTE)(cb * alpha / 255);
+            px[1] = (BYTE)(cg * alpha / 255);
+            px[2] = (BYTE)(cr * alpha / 255);
+            px[3] = alpha;
+        }
+    }
+    return bmp;
+}
+
+static HBITMAP GetCachedCornerTile(int radius, COLORREF color, int cornerIdx) {
+    CornerTileKey key{ radius, color };
+    auto& cache = g_cornerTileCache[cornerIdx];
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    HBITMAP bmp = CreateCornerTileBitmap(radius, color, cornerIdx);
+    cache.emplace(key, bmp);
+    return bmp;
+}
+
+// Paints a rounded, antialiased, solid-colored rectangle into memDC: straight
+// edges/middle via FillRect (cheap, exact), corners via cached antialiased
+// alpha tiles composited with AlphaBlend (cheap on every repaint after the
+// first one, since the tiles are cached for the lifetime of the process).
+static void PaintAntialiasedRoundedFill(HDC memDC, const RECT& r, int radius, COLORREF color) {
+    int w = r.right - r.left, h = r.bottom - r.top;
+    if (w <= 0 || h <= 0) return;
+    int rad = min(radius, min(w, h) / 2);
+    if (rad <= 0) {
+        HBRUSH br = CreateSolidBrush(color);
+        FillRect(memDC, &r, br);
+        DeleteObject(br);
+        return;
+    }
+
+    HBRUSH br = CreateSolidBrush(color);
+    RECT centerVert = { r.left, r.top + rad, r.right, r.bottom - rad };
+    RECT topMid     = { r.left + rad, r.top, r.right - rad, r.top + rad };
+    RECT bottomMid  = { r.left + rad, r.bottom - rad, r.right - rad, r.bottom };
+    FillRect(memDC, &centerVert, br);
+    FillRect(memDC, &topMid, br);
+    FillRect(memDC, &bottomMid, br);
+    DeleteObject(br);
+
+    HBITMAP tiles[4] = {
+        GetCachedCornerTile(rad, color, 0), // top-left
+        GetCachedCornerTile(rad, color, 1), // top-right
+        GetCachedCornerTile(rad, color, 2), // bottom-left
+        GetCachedCornerTile(rad, color, 3), // bottom-right
+    };
+    POINT origins[4] = {
+        { r.left, r.top },
+        { r.right - rad, r.top },
+        { r.left, r.bottom - rad },
+        { r.right - rad, r.bottom - rad },
+    };
+    HDC srcDC = CreateCompatibleDC(memDC);
+    BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    for (int i = 0; i < 4; ++i) {
+        if (!tiles[i]) continue;
+        HGDIOBJ oldSrc = SelectObject(srcDC, tiles[i]);
+        AlphaBlend(memDC, origins[i].x, origins[i].y, rad, rad, srcDC, 0, 0, rad, rad, bf);
+        SelectObject(srcDC, oldSrc);
+    }
+    DeleteDC(srcDC);
+}
+
+// ---------------------------------------------------------------------------
+// Antialiased rounded-corner border cache ("BORDE DEL MENU").
+// ---------------------------------------------------------------------------
+// Same technique as the rounded fill above (cached per-corner alpha tiles,
+// straight edges via plain FillRect), but each corner tile only paints the
+// ring between (radius - borderWidth) and radius from the circle center,
+// i.e. a stroke/outline instead of a solid quarter-disc. Cached by
+// (radius, color, borderWidth) so repaints after the first one just replay
+// a few small AlphaBlend calls.
+struct CornerBorderTileKey {
+    int radius;
+    int borderWidth;
+    COLORREF color;
+    bool operator==(const CornerBorderTileKey& o) const {
+        return radius == o.radius && borderWidth == o.borderWidth && color == o.color;
+    }
+};
+struct CornerBorderTileKeyHash {
+    size_t operator()(const CornerBorderTileKey& k) const {
+        size_t h = std::hash<int>()(k.radius);
+        h = (h * 31) ^ std::hash<int>()(k.borderWidth);
+        h = (h * 31) ^ std::hash<DWORD>()((DWORD)k.color);
+        return h;
+    }
+};
+// Index: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right.
+static std::unordered_map<CornerBorderTileKey, HBITMAP, CornerBorderTileKeyHash> g_cornerBorderTileCache[4];
+
+static HBITMAP CreateCornerBorderTileBitmap(int radius, int borderWidth, COLORREF color, int cornerIdx) {
+    if (radius <= 0) return nullptr;
+    BITMAPINFO bmi = { 0 };
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = radius;
+    bmi.bmiHeader.biHeight      = -radius; // top-down
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP bmp = ::CreateDIBSection(GetDC(nullptr), &bmi, DIB_RGB_COLORS, &bits, 0, 0);
+    if (!bmp || !bits) return nullptr;
+
+    BYTE cr = GetRValue(color), cg = GetGValue(color), cb = GetBValue(color);
+    const int ss = 4; // 4x4 supersampling for both edges of the ring
+    double cx = (cornerIdx == 0 || cornerIdx == 2) ? radius : 0; // circle center within the tile
+    double cy = (cornerIdx == 0 || cornerIdx == 1) ? radius : 0;
+    double innerR = (double)radius - borderWidth;
+    for (int y = 0; y < radius; ++y) {
+        BYTE* row = (BYTE*)bits + (size_t)y * radius * 4;
+        for (int x = 0; x < radius; ++x) {
+            int hits = 0;
+            for (int sy = 0; sy < ss; ++sy) {
+                double py = y + (sy + 0.5) / ss;
+                double dy = py - cy;
+                for (int sx = 0; sx < ss; ++sx) {
+                    double px2 = x + (sx + 0.5) / ss;
+                    double dx = px2 - cx;
+                    double d2 = dx * dx + dy * dy;
+                    if (d2 <= (double)radius * radius && (innerR <= 0 || d2 >= innerR * innerR)) ++hits;
+                }
+            }
+            BYTE alpha = (BYTE)((hits * 255) / (ss * ss));
+            BYTE* px = row + (size_t)x * 4;
+            // Premultiplied BGRA, as required by AlphaBlend's AC_SRC_ALPHA.
+            px[0] = (BYTE)(cb * alpha / 255);
+            px[1] = (BYTE)(cg * alpha / 255);
+            px[2] = (BYTE)(cr * alpha / 255);
+            px[3] = alpha;
+        }
+    }
+    return bmp;
+}
+
+static HBITMAP GetCachedCornerBorderTile(int radius, int borderWidth, COLORREF color, int cornerIdx) {
+    CornerBorderTileKey key{ radius, borderWidth, color };
+    auto& cache = g_cornerBorderTileCache[cornerIdx];
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+    HBITMAP bmp = CreateCornerBorderTileBitmap(radius, borderWidth, color, cornerIdx);
+    cache.emplace(key, bmp);
+    return bmp;
+}
+
+// Paints a rounded, antialiased border/outline (not a solid fill) around r:
+// straight edge segments via plain FillRect strips of thickness borderWidth,
+// corners via cached antialiased alpha ring tiles composited with
+// AlphaBlend. Used for "BORDE DEL MENU" (menu_border) when it isn't
+// SCFG_MENU_BORDER_DEFAULT, so menus/submenus/split-grid windows get a
+// rounded-corner, cheap-to-repaint colored border.
+static void PaintAntialiasedRoundedBorder(HDC memDC, const RECT& r, int radius, int borderWidth, COLORREF color) {
+    int w = r.right - r.left, h = r.bottom - r.top;
+    if (w <= 0 || h <= 0 || borderWidth <= 0) return;
+    int rad = min(radius, min(w, h) / 2);
+    int bw = min(borderWidth, rad > 0 ? rad : borderWidth);
+    if (rad <= 0) {
+        HBRUSH br = CreateSolidBrush(color);
+        RECT top    = { r.left, r.top, r.right, r.top + bw };
+        RECT bottom = { r.left, r.bottom - bw, r.right, r.bottom };
+        RECT left   = { r.left, r.top, r.left + bw, r.bottom };
+        RECT right  = { r.right - bw, r.top, r.right, r.bottom };
+        FillRect(memDC, &top, br); FillRect(memDC, &bottom, br);
+        FillRect(memDC, &left, br); FillRect(memDC, &right, br);
+        DeleteObject(br);
+        return;
+    }
+
+    HBRUSH br = CreateSolidBrush(color);
+    RECT leftEdge   = { r.left, r.top + rad, r.left + bw, r.bottom - rad };
+    RECT rightEdge  = { r.right - bw, r.top + rad, r.right, r.bottom - rad };
+    RECT topEdge    = { r.left + rad, r.top, r.right - rad, r.top + bw };
+    RECT bottomEdge = { r.left + rad, r.bottom - bw, r.right - rad, r.bottom };
+    FillRect(memDC, &leftEdge, br);
+    FillRect(memDC, &rightEdge, br);
+    FillRect(memDC, &topEdge, br);
+    FillRect(memDC, &bottomEdge, br);
+    DeleteObject(br);
+
+    HBITMAP tiles[4] = {
+        GetCachedCornerBorderTile(rad, bw, color, 0), // top-left
+        GetCachedCornerBorderTile(rad, bw, color, 1), // top-right
+        GetCachedCornerBorderTile(rad, bw, color, 2), // bottom-left
+        GetCachedCornerBorderTile(rad, bw, color, 3), // bottom-right
+    };
+    POINT origins[4] = {
+        { r.left, r.top },
+        { r.right - rad, r.top },
+        { r.left, r.bottom - rad },
+        { r.right - rad, r.bottom - rad },
+    };
+    HDC srcDC = CreateCompatibleDC(memDC);
+    BLENDFUNCTION bf{ AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    for (int i = 0; i < 4; ++i) {
+        if (!tiles[i]) continue;
+        HGDIOBJ oldSrc = SelectObject(srcDC, tiles[i]);
+        AlphaBlend(memDC, origins[i].x, origins[i].y, rad, rad, srcDC, 0, 0, rad, rad, bf);
+        SelectObject(srcDC, oldSrc);
+    }
+    DeleteDC(srcDC);
 }
 
 // ---------------------------------------------------------------------------
@@ -5518,7 +5878,7 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             int iPad = MulDiv(8, dpi, 96);
             int sidePad = MulDiv(8, dpi, 96);
 
-            LOGFONT tlf{}; tlf.lfHeight = -MulDiv(12, dpi, 96); tlf.lfWeight = FW_BOLD;
+            LOGFONT tlf{}; tlf.lfHeight = -MulDiv(12, dpi, 96); tlf.lfWeight = gs->app ? gs->app->TitleFontWeight() : FW_BOLD;
             wcscpy_s(tlf.lfFaceName, L"Segoe UI");
             HFONT titleFnt = CreateFontIndirect(&tlf);
 
@@ -5536,7 +5896,9 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 nameRightFnt = CreateFontIndirect(&ncm.lfMenuFont);
             }
 
-            COLORREF sepClr = dm ? RGB(70,70,70) : GetSysColor(COLOR_3DSHADOW);
+            COLORREF sepClr = (gs->app && (gs->app->split_title_accent || gs->app->split_title_fill))
+                ? gs->app->TitleAccentColor()
+                : (dm ? RGB(70,70,70) : GetSysColor(COLOR_3DSHADOW));
 
             int flat = 0;
             for (auto& sec : gs->splitSections) {
@@ -5545,9 +5907,32 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                 titleName = Util::StripSortPrefix(Util::LastPathSegment(titleName));
                 titleName = Util::StripSubmenuSuffix(titleName);
                 HFONT oldTF = (HFONT)SelectObject(memDC, titleFnt);
-                SetTextColor(memDC, sepClr);
-                SetBkMode(memDC, TRANSPARENT);
                 RECT tr = { sidePad, sec.sectionY, rc.right - sidePad, sec.sectionY + sec.titleH };
+
+                bool titleFill = gs->app && gs->app->split_title_fill;
+                if (titleFill) {
+                    // Rounded, accent-colored fill behind the TITLE text only,
+                    // with a small gap on all 4 sides; the TITLE text itself
+                    // is drawn using the menu background color so it reads
+                    // clearly on top of the fill.
+                    RECT measureRc = { 0, 0, 0, 0 };
+                    DrawText(memDC, titleName.c_str(), -1, &measureRc, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+                    int textW = measureRc.right - measureRc.left;
+                    int textH = measureRc.bottom - measureRc.top;
+                    int centerY = (tr.top + tr.bottom) / 2;
+                    int gapPx = MulDiv(2, dpi, 96);
+                    int gapPxH = MulDiv(4, dpi, 96);
+                    int radius = MulDiv(8, dpi, 96);
+                    RECT fillRc = {
+                        tr.left - gapPxH, centerY - textH / 2 - gapPx,
+                        tr.left + textW + gapPxH, centerY + textH / 2 + gapPx
+                    };
+                    COLORREF fillClr = gs->app->TitleAccentColor();
+                    PaintAntialiasedRoundedFill(memDC, fillRc, radius, fillClr);
+                }
+
+                SetTextColor(memDC, titleFill ? gs->app->BackgroundColor() : sepClr);
+                SetBkMode(memDC, TRANSPARENT);
                 DrawText(memDC, titleName.c_str(), -1, &tr, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                 SelectObject(memDC, oldTF);
 
@@ -5634,6 +6019,11 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (titleFnt) DeleteObject(titleFnt);
             if (nameBelowFnt) DeleteObject(nameBelowFnt);
             if (nameRightFnt) DeleteObject(nameRightFnt);
+
+            if (gs->app && gs->app->menu_border != SCFG_MENU_BORDER_DEFAULT) {
+                UINT dpi2 = GetDpiForWindow(hwnd);
+                PaintAntialiasedRoundedBorder(memDC, rc, MulDiv(8, dpi2, 96), MulDiv(1, dpi2, 96), gs->app->MenuBorderColor());
+            }
 
             BitBlt(dc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
             SelectObject(memDC, oldBmp); DeleteObject(memBmp); DeleteDC(memDC);
@@ -5835,6 +6225,12 @@ LRESULT CALLBACK GridWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         }
         if (labelFnt) DeleteObject(labelFnt);
         if (mainMenuFnt) DeleteObject(mainMenuFnt);
+
+        if (gs->app && gs->app->menu_border != SCFG_MENU_BORDER_DEFAULT) {
+            UINT dpi2 = GetDpiForWindow(hwnd);
+            PaintAntialiasedRoundedBorder(memDC, rc, MulDiv(8, dpi2, 96), MulDiv(1, dpi2, 96), gs->app->MenuBorderColor());
+        }
+
         BitBlt(dc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
         SelectObject(memDC, oldBmp); DeleteObject(memBmp); DeleteDC(memDC);
         EndPaint(hwnd, &ps);

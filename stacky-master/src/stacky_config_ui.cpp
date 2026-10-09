@@ -45,7 +45,20 @@ const wchar_t* kConfigWndClass = L"stacky_config_wnd";
 // language (e.g. L"en", L"es", L"fr"...), lowercase. Falls back to L"en" on
 // failure. Kept in sync with stacky.cpp's Util::GetUILanguageCode(), which
 // lives in a different translation unit and isn't reachable from here.
+//
+// Uses GetUserPreferredUILanguages (MUI_LANGUAGE_NAME), which reflects the
+// Windows display language actually chosen in Settings > Time & Language >
+// Language, and NOT GetUserDefaultLocaleName, which reflects the regional
+// format/locale and can remain unchanged (e.g. still es-ES) even after
+// switching the Windows display language to English.
 std::wstring GetUILanguageCode() {
+	ULONG numLangs = 0;
+	WCHAR buf[LOCALE_NAME_MAX_LENGTH * 4] = { 0 };
+	ULONG bufLen = ARRAYSIZE(buf);
+	if (::GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &numLangs, buf, &bufLen) && numLangs > 0 && buf[0] && buf[1]) {
+		WCHAR code[3] = { (WCHAR)towlower(buf[0]), (WCHAR)towlower(buf[1]), 0 };
+		return std::wstring(code);
+	}
 	WCHAR name[LOCALE_NAME_MAX_LENGTH] = { 0 };
 	if (::GetUserDefaultLocaleName(name, LOCALE_NAME_MAX_LENGTH) > 0 && name[0] && name[1]) {
 		WCHAR code[3] = { (WCHAR)towlower(name[0]), (WCHAR)towlower(name[1]), 0 };
@@ -106,6 +119,16 @@ struct ConfigUIStrings {
 	const wchar_t* sublayoutIconOnly;
 	const wchar_t* sublayoutNameRight;
 	const wchar_t* sublayoutNameBelow;
+	const wchar_t* lblTitleWeight;
+	const wchar_t* titleWeightNormal;
+	const wchar_t* titleWeightSemibold;
+	const wchar_t* titleWeightBold;
+	const wchar_t* checkTitleAccent;
+	const wchar_t* checkTitleFill;
+	const wchar_t* lblMenuBorder;
+	const wchar_t* menuBorderDefault;
+	const wchar_t* menuBorderAccent;
+	const wchar_t* menuBorderNone;
 	const wchar_t* msgTitle;
 	const wchar_t* msgShortcutCreateFailed;
 	const wchar_t* msgShortcutCreated;
@@ -137,6 +160,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"List with submenus", L"Icon grid", L"Double column", L"Double row", L"Single submenu", L"Split icon grid",
 			L"Alphabetical", L"Folders first",
 			L"Icon only", L"Name to the right", L"Name below",
+			L"TITLE STYLE",
+			L"Normal", L"Semibold", L"Bold",
+			L"Separators (and title) with accent color",
+			L"Fill title",
+			L"MENU BORDER",
+			L"Default", L"Accent color", L"No border",
 			L"Stacky",
 			L"Could not create the menu shortcut.",
 			L"Menu shortcut created successfully.",
@@ -165,6 +194,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Lista con submenús", L"Cuadrícula de iconos", L"Doble columna", L"Doble fila", L"Submenú único", L"Cuadrícula dividida de íconos",
 			L"Alfabético", L"Carpetas primero",
 			L"Solo icono", L"Nombre a la derecha", L"Nombre debajo",
+			L"ESTILO DE TÍTULO",
+			L"Normal", L"Seminegrita", L"Negrita",
+			L"Separadores (y título) con color de énfasis",
+			L"Rellenar título",
+			L"BORDE DEL MENÚ",
+			L"Predeterminado", L"Color de énfasis", L"Sin borde",
 			L"Stacky",
 			L"No se pudo crear el acceso directo del menú.",
 			L"Acceso directo del menú creado correctamente.",
@@ -193,6 +228,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Lista com submenus", L"Grade de ícones", L"Coluna dupla", L"Linha dupla", L"Submenu único", L"Grade dividida de ícones",
 			L"Alfabético", L"Pastas primeiro",
 			L"Somente ícone", L"Nome à direita", L"Nome abaixo",
+			L"ESTILO DO TÍTULO",
+			L"Normal", L"Seminegrito", L"Negrito",
+			L"Separadores (e título) com cor de destaque",
+			L"Preencher título",
+			L"BORDA DO MENU",
+			L"Padrão", L"Cor de destaque", L"Sem borda",
 			L"Stacky",
 			L"Não foi possível criar o atalho do menu.",
 			L"Atalho do menu criado com sucesso.",
@@ -221,6 +262,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Liste avec sous-menus", L"Grille d'icônes", L"Double colonne", L"Double ligne", L"Sous-menu unique", L"Grille d'icônes divisée",
 			L"Alphabétique", L"Dossiers en premier",
 			L"Icône seule", L"Nom à droite", L"Nom en dessous",
+			L"STYLE DU TITRE",
+			L"Normal", L"Semi-gras", L"Gras",
+			L"Séparateurs (et titre) avec couleur d'accent",
+			L"Remplir le titre",
+			L"BORDURE DU MENU",
+			L"Par défaut", L"Couleur d'accent", L"Sans bordure",
 			L"Stacky",
 			L"Impossible de créer le raccourci du menu.",
 			L"Raccourci du menu créé avec succès.",
@@ -249,6 +296,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Liste mit Untermenüs", L"Symbolraster", L"Doppelspalte", L"Doppelzeile", L"Einzelnes Untermenü", L"Geteiltes Symbolraster",
 			L"Alphabetisch", L"Ordner zuerst",
 			L"Nur Symbol", L"Name rechts", L"Name unten",
+			L"TITELSTIL",
+			L"Normal", L"Halbfett", L"Fett",
+			L"Trennlinien (und Titel) mit Akzentfarbe",
+			L"Titel füllen",
+			L"MENÜRAHMEN",
+			L"Standard", L"Akzentfarbe", L"Kein Rahmen",
 			L"Stacky",
 			L"Die Menüverknüpfung konnte nicht erstellt werden.",
 			L"Menüverknüpfung erfolgreich erstellt.",
@@ -277,6 +330,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Elenco con sottomenu", L"Griglia di icone", L"Doppia colonna", L"Doppia riga", L"Sottomenu unico", L"Griglia di icone divisa",
 			L"Alfabetico", L"Cartelle prima",
 			L"Solo icona", L"Nome a destra", L"Nome sotto",
+			L"STILE DEL TITOLO",
+			L"Normale", L"Semigrassetto", L"Grassetto",
+			L"Separatori (e titolo) con colore accento",
+			L"Riempi titolo",
+			L"BORDO DEL MENU",
+			L"Predefinito", L"Colore accento", L"Nessun bordo",
 			L"Stacky",
 			L"Impossibile creare il collegamento del menu.",
 			L"Collegamento del menu creato correttamente.",
@@ -305,6 +364,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Lista z podmenu", L"Siatka ikon", L"Podwójna kolumna", L"Podwójny wiersz", L"Pojedyncze podmenu", L"Podzielona siatka ikon",
 			L"Alfabetycznie", L"Najpierw foldery",
 			L"Tylko ikona", L"Nazwa po prawej", L"Nazwa poniżej",
+			L"STYL TYTUŁU",
+			L"Normalny", L"Półpogrubiony", L"Pogrubiony",
+			L"Separatory (i tytuł) w kolorze akcentu",
+			L"Wypełnij tytuł",
+			L"OBRAM. MENU",
+			L"Domyślny", L"Kolor akcentu", L"Bez obramowania",
 			L"Stacky",
 			L"Nie udało się utworzyć skrótu menu.",
 			L"Skrót menu został utworzony pomyślnie.",
@@ -333,6 +398,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"Список с подменю", L"Сетка значков", L"Двойной столбец", L"Двойная строка", L"Единое подменю", L"Разделённая сетка значков",
 			L"По алфавиту", L"Сначала папки",
 			L"Только значок", L"Имя справа", L"Имя снизу",
+			L"СТИЛЬ ЗАГОЛОВКА",
+			L"Обычный", L"Полужирный", L"Жирный",
+			L"Разделители (и заголовок) с цветом акцента",
+			L"Заполнить заголовок",
+			L"РАМКА МЕНЮ",
+			L"По умолчанию", L"Цвет акцента", L"Без рамки",
 			L"Stacky",
 			L"Не удалось создать ярлык меню.",
 			L"Ярлык меню успешно создан.",
@@ -361,6 +432,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"带子菜单的列表", L"图标网格", L"双列", L"双行", L"单一子菜单", L"分区图标网格",
 			L"按字母顺序", L"文件夹优先",
 			L"仅图标", L"名称在右侧", L"名称在下方",
+			L"标题样式",
+			L"常规", L"半粗体", L"粗体",
+			L"分隔线（及标题）使用强调色",
+			L"填充标题",
+			L"菜单边框",
+			L"默认", L"强调色", L"无边框",
 			L"Stacky",
 			L"无法创建菜单快捷方式。",
 			L"菜单快捷方式创建成功。",
@@ -389,6 +466,12 @@ const ConfigUIStrings& GetConfigUIStrings() {
 			L"サブメニュー付きリスト", L"アイコングリッド", L"二重列", L"二重行", L"単一サブメニュー", L"分割アイコングリッド",
 			L"アルファベット順", L"フォルダーを先に",
 			L"アイコンのみ", L"名前を右に", L"名前を下に",
+			L"タイトルの太さ",
+			L"標準", L"セミボールド", L"ボールド",
+			L"区切り線（とタイトル）に強調色を使用",
+			L"タイトルを塗りつぶす",
+			L"メニューの枠線",
+			L"既定", L"強調色", L"枠線なし",
 			L"Stacky",
 			L"メニューのショートカットを作成できませんでした。",
 			L"メニューのショートカットが正常に作成されました。",
@@ -447,7 +530,7 @@ static const ConfigCustomThemeColors kConfigCustomThemeColors[9] = {
 	{ RGB(0xF9, 0xB5, 0x66), RGB(0xFC, 0xDE, 0xBA) }, // NARANJA
 	{ RGB(0xC0, 0xAE, 0xDE), RGB(0xE8, 0xDF, 0xF4) }, // VIOLETA
 	{ RGB(0xED, 0xB1, 0xC8), RGB(0xF8, 0xD9, 0xDE) }, // ROSA
-	{ RGB(0xFF, 0x72, 0x80), RGB(0xFF, 0xC6, 0xC9) }, // ROJO
+	{ RGB(0xFF, 0x4A, 0x46), RGB(0xFF, 0xC6, 0xC9) }, // ROJO
 	{ RGB(0xEF, 0xCF, 0x6A), RGB(0xFF, 0xF7, 0xD1) }, // AMARILLO
 	{ RGB(0xDD, 0xB9, 0x96), RGB(0xF2, 0xDA, 0xC6) }, // MARRÓN
 	{ RGB(0x7B, 0xB5, 0xE3), RGB(0xCE, 0xD6, 0xFF) }, // AZUL
@@ -510,6 +593,13 @@ enum ControlId {
 	IDC_LBL_SUBLAYOUT = 1155,
 	IDC_COMBO_SUBLAYOUT = 1156,
 
+	IDC_LBL_TITLE_WEIGHT = 1158,
+	IDC_COMBO_TITLE_WEIGHT = 1159,
+	IDC_CHECK_TITLE_ACCENT = 1160,
+	IDC_CHECK_TITLE_FILL = 1161,
+	IDC_LBL_MENU_BORDER = 1162,
+	IDC_COMBO_MENU_BORDER = 1163,
+
 	IDC_LBL_PLACEHOLDER = 1199,
 };
 
@@ -562,6 +652,16 @@ struct ConfigWindowState {
 	HWND hwndCheckAddSeparator = nullptr;
 	HWND hwndLblCols = nullptr, hwndEditCols = nullptr;
 	HWND hwndCheckNamesBelow = nullptr, hwndCheckNamesRight = nullptr;
+	HWND hwndLblTitleWeight = nullptr, hwndComboTitleWeight = nullptr;
+	HWND hwndCheckTitleAccent = nullptr;
+	HWND hwndCheckTitleFill = nullptr;
+	HWND hwndLblMenuBorder = nullptr, hwndComboMenuBorder = nullptr;
+
+	// Bottom y-coordinate (client coords, in hwnd's space) of the "TITULO CON
+	// COLOR DE ENFASIS" row, captured right after it's created in
+	// CreateRightPanelControls(). Used by WM_CREATE to size the left tree
+	// view so its bottom edge lines up with the bottom of that option.
+	int rootPanelBottom = 0;
 
 	// Original root-panel positions (client coords, relative to hwndRightPanel's
 	// parent window) of hwndCheckMini/hwndCheckAddSeparator, captured right
@@ -786,6 +886,27 @@ HWND CreateLabel(HWND parent, HINSTANCE hInst, const wchar_t* text, int x, int y
 		x, y, w, h, parent, (HMENU)(INT_PTR)id, hInst, nullptr);
 }
 
+// Measures the height (in pixels) that a BS_MULTILINE checkbox's text needs
+// to word-wrap within the given width, using DEFAULT_GUI_FONT (the font
+// ApplyDefaultFontToChildren() later applies to every control). Used so
+// multi-line checkboxes (e.g. "Add separator...") are created with exactly
+// the height their text needs instead of a guessed fixed height, which
+// otherwise leaves a blank line above/below the text when the guess is too
+// tall for the actual (language-dependent) wrapped line count.
+int MeasureMultilineCheckboxHeight(const wchar_t* text, int width) {
+	HDC hdc = ::GetDC(nullptr);
+	HFONT font = (HFONT)::GetStockObject(DEFAULT_GUI_FONT);
+	HGDIOBJ oldFont = ::SelectObject(hdc, font);
+	// The checkbox's own tick glyph + spacing eats into the available text
+	// width; subtract a conservative margin so the measured wrap matches
+	// what the actual control will do.
+	RECT rc = { 0, 0, width - 20, 0 };
+	::DrawText(hdc, text, -1, &rc, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+	::SelectObject(hdc, oldFont);
+	::ReleaseDC(nullptr, hdc);
+	return rc.bottom - rc.top;
+}
+
 // Scans folder's direct children and reports whether it contains at least
 // one subfolder and at least one plain file (shortcut/exe/etc, ignoring
 // hidden files and the internal ".stacky-config"/"!stacky.cache" files).
@@ -990,6 +1111,14 @@ void PopulateCombos(ConfigWindowState* state) {
 	ComboBox_AddString(state->hwndComboSubLayout, S.sublayoutIconOnly);
 	ComboBox_AddString(state->hwndComboSubLayout, S.sublayoutNameRight);
 	ComboBox_AddString(state->hwndComboSubLayout, S.sublayoutNameBelow);
+
+	ComboBox_AddString(state->hwndComboTitleWeight, S.titleWeightNormal);
+	ComboBox_AddString(state->hwndComboTitleWeight, S.titleWeightSemibold);
+	ComboBox_AddString(state->hwndComboTitleWeight, S.titleWeightBold);
+
+	ComboBox_AddString(state->hwndComboMenuBorder, S.menuBorderDefault);
+	ComboBox_AddString(state->hwndComboMenuBorder, S.menuBorderAccent);
+	ComboBox_AddString(state->hwndComboMenuBorder, S.menuBorderNone);
 }
 
 // Creates every control used by the right-hand panel (both root and submenu
@@ -1053,9 +1182,29 @@ void CreateRightPanelControls(HWND hwnd, HINSTANCE hInst, ConfigWindowState* sta
 	state->hwndComboSort = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
 		x, y, w, 200, hwnd, (HMENU)IDC_COMBO_SORT, hInst, nullptr); y += gap;
 
+	int sepCheckH = MeasureMultilineCheckboxHeight(S.checkAddSeparator, w) + 4;
 	state->hwndCheckAddSeparator = ::CreateWindow(L"BUTTON",
 		S.checkAddSeparator, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_MULTILINE,
-		x, y, w, rowH * 2, hwnd, (HMENU)IDC_CHECK_ADD_SEPARATOR, hInst, nullptr); y += rowH * 2 + 8;
+		x, y, w, sepCheckH, hwnd, (HMENU)IDC_CHECK_ADD_SEPARATOR, hInst, nullptr); y += sepCheckH + 8;
+
+	state->hwndLblTitleWeight = CreateLabel(hwnd, hInst, S.lblTitleWeight, x, y, w, 18, IDC_LBL_TITLE_WEIGHT); y += 20;
+	state->hwndComboTitleWeight = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+		x, y, w, 200, hwnd, (HMENU)IDC_COMBO_TITLE_WEIGHT, hInst, nullptr); y += gap;
+
+	state->hwndCheckTitleAccent = ::CreateWindow(L"BUTTON", S.checkTitleAccent, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+		x, y, w, rowH, hwnd, (HMENU)IDC_CHECK_TITLE_ACCENT, hInst, nullptr); y += gap;
+
+	state->hwndCheckTitleFill = ::CreateWindow(L"BUTTON", S.checkTitleFill, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+		x, y, w, rowH, hwnd, (HMENU)IDC_CHECK_TITLE_FILL, hInst, nullptr); y += gap;
+
+	state->hwndLblMenuBorder = CreateLabel(hwnd, hInst, S.lblMenuBorder, x, y, w, 18, IDC_LBL_MENU_BORDER); y += 20;
+	state->hwndComboMenuBorder = ::CreateWindowEx(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+		x, y, w, 200, hwnd, (HMENU)IDC_COMBO_MENU_BORDER, hInst, nullptr); y += gap;
+
+	// Blank row so this option doesn't sit right against the
+	// GUARDAR/CREAR MENU/... buttons at the bottom of the window.
+	y += gap;
+	state->rootPanelBottom = y;
 
 	// Submenu-only controls (share the same vertical band as some root
 	// controls but are shown exclusively when a submenu node is selected).
@@ -1106,6 +1255,10 @@ void HideAllPanelControls(ConfigWindowState* state) {
 		state->hwndLblMode, state->hwndComboMode,
 		state->hwndLblSort, state->hwndComboSort,
 		state->hwndCheckAddSeparator,
+		state->hwndLblTitleWeight, state->hwndComboTitleWeight,
+		state->hwndCheckTitleAccent,
+		state->hwndCheckTitleFill,
+		state->hwndLblMenuBorder, state->hwndComboMenuBorder,
 		state->hwndLblCols, state->hwndEditCols,
 		state->hwndCheckNamesBelow, state->hwndCheckNamesRight,
 		state->hwndLblSubIcon, state->hwndEditSubIcon, state->hwndBtnBrowseSubIcon, state->hwndSubIconPreview,
@@ -1165,6 +1318,18 @@ void UpdateGridColsEnabled(ConfigWindowState* state) {
 
 	if (state->hwndEditCols) ::EnableWindow(state->hwndEditCols, isIconGrid || isSplitGrid);
 
+	// The title weight selector only applies to "Cuadrícula dividida de
+	// iconos" (SCFG_MODE_SPLITGRID); it's disabled for every other mode.
+	if (state->hwndComboTitleWeight) ::EnableWindow(state->hwndComboTitleWeight, isSplitGrid);
+	// "SEPARADORES (Y TITULO) CON COLOR DE ENFASIS" also applies to "Lista
+	// con submenus" and "Submenu unico": in those modes it only colors the
+	// separators (there's no section TITLE to color there), while in
+	// "Cuadricula dividida de iconos" it colors both the section TITLEs and
+	// separators as before. "Rellenar titulo" remains exclusive to
+	// SCFG_MODE_SPLITGRID since it needs a TITLE to draw the fill behind.
+	if (state->hwndCheckTitleAccent) ::EnableWindow(state->hwndCheckTitleAccent, isSplitGrid || isDefault || isSingleSub);
+	if (state->hwndCheckTitleFill) ::EnableWindow(state->hwndCheckTitleFill, isSplitGrid);
+
 	if (state->hwndCheckNamesBelow) {
 		::EnableWindow(state->hwndCheckNamesBelow, !namesLocked);
 		if (namesLocked) Button_SetCheck(state->hwndCheckNamesBelow, BST_UNCHECKED);
@@ -1196,6 +1361,10 @@ void ApplyConfigToControls(ConfigWindowState* state, const StackyFolderConfig& c
 	::SetWindowText(state->hwndEditIcon, menuIconPath.c_str());
 	SetPreviewIcon(state->hwndIconPreview, state->hIconPreview, menuIconPath, folderPath);
 	Button_SetCheck(state->hwndCheckMini, cfg.mini_icons ? BST_CHECKED : BST_UNCHECKED);
+	ComboBox_SetCurSel(state->hwndComboTitleWeight, (int)cfg.split_title_weight);
+	Button_SetCheck(state->hwndCheckTitleAccent, cfg.split_title_accent ? BST_CHECKED : BST_UNCHECKED);
+	Button_SetCheck(state->hwndCheckTitleFill, cfg.split_title_fill ? BST_CHECKED : BST_UNCHECKED);
+	ComboBox_SetCurSel(state->hwndComboMenuBorder, (int)cfg.menu_border);
 	ComboBox_SetCurSel(state->hwndComboTheme, (int)cfg.theme);
 	if (state->hwndThemeSwatch) ::InvalidateRect(state->hwndThemeSwatch, nullptr, TRUE);
 	Button_SetCheck(state->hwndCheckMousePos, cfg.mouse_position ? BST_CHECKED : BST_UNCHECKED);
@@ -1230,6 +1399,16 @@ void ReadControlsIntoConfig(ConfigWindowState* state, StackyFolderConfig& cfg) {
 	cfg.mode = (StackyConfigMode)ComboBox_GetCurSel(state->hwndComboMode);
 	cfg.sort_mode = (StackyConfigSort)ComboBox_GetCurSel(state->hwndComboSort);
 	cfg.add_separator = Button_GetCheck(state->hwndCheckAddSeparator) == BST_CHECKED;
+	{
+		int titleWeightSel = ComboBox_GetCurSel(state->hwndComboTitleWeight);
+		if (titleWeightSel != CB_ERR) cfg.split_title_weight = (StackyTitleWeight)titleWeightSel;
+	}
+	cfg.split_title_accent = Button_GetCheck(state->hwndCheckTitleAccent) == BST_CHECKED;
+	cfg.split_title_fill = Button_GetCheck(state->hwndCheckTitleFill) == BST_CHECKED;
+	{
+		int menuBorderSel = ComboBox_GetCurSel(state->hwndComboMenuBorder);
+		if (menuBorderSel != CB_ERR) cfg.menu_border = (StackyMenuBorder)menuBorderSel;
+	}
 	::GetWindowText(state->hwndEditCols, buf, MAX_PATH); cfg.grid_cols = _wtoi(buf);
 	bool namesBelowChecked = Button_GetCheck(state->hwndCheckNamesBelow) == BST_CHECKED;
 	if (cfg.mode == SCFG_MODE_DOUBLE_COL) {
@@ -1303,6 +1482,10 @@ void ShowPanelFor(ConfigWindowState* state, int nodeIndex) {
 			state->hwndLblMode, state->hwndComboMode,
 			state->hwndLblSort, state->hwndComboSort,
 			state->hwndCheckAddSeparator,
+			state->hwndLblTitleWeight, state->hwndComboTitleWeight,
+			state->hwndCheckTitleAccent,
+			state->hwndCheckTitleFill,
+			state->hwndLblMenuBorder, state->hwndComboMenuBorder,
 			state->hwndLblCols, state->hwndEditCols,
 			state->hwndCheckNamesBelow, state->hwndCheckNamesRight,
 		};
@@ -1700,6 +1883,23 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 		HideAllPanelControls(state);
 		::ShowWindow(state->hwndRightPanel, SW_SHOW);
 
+		// Resize the left tree view (and the placeholder right panel) so
+		// their bottom edge lines up with the bottom of the "TITULO CON
+		// COLOR DE ENFASIS"/"RELLENAR TITULO" rows (plus the blank row
+		// below them), instead of the generic rc.bottom - 100 guess used
+		// above. Clamped to the space actually available above the
+		// GUARDAR/CREAR MENU/... buttons (which sit at rc.bottom - 40) so
+		// the tree/panel never overlaps them even if the window is too
+		// short to fit every control at its natural position.
+		if (state->rootPanelBottom > 0) {
+			int buttonsTop = rc.bottom - 40;
+			int availableBottom = buttonsTop - 10; // small gap above the buttons
+			int treeBottom = min(state->rootPanelBottom, availableBottom);
+			int newHeight = treeBottom - 10;
+			::SetWindowPos(state->hwndTree, nullptr, 0, 0, 220, newHeight, SWP_NOMOVE | SWP_NOZORDER);
+			::SetWindowPos(state->hwndRightPanel, nullptr, 0, 0, rc.right - 250, newHeight, SWP_NOMOVE | SWP_NOZORDER);
+		}
+
 		state->hwndBtnSave = ::CreateWindow(L"BUTTON", S.btnSave,
 			WS_CHILD | WS_VISIBLE, 10, rc.bottom - 40, 100, 28, hwnd, (HMENU)IDC_BTN_SAVE, ::GetModuleHandle(nullptr), nullptr);
 		state->hwndBtnCreate = ::CreateWindow(L"BUTTON", S.btnCreateMenu,
@@ -1955,6 +2155,22 @@ LRESULT CALLBACK ConfigWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 		case IDC_EDIT_ICON:
 		case IDC_CHECK_MINI:
 		case IDC_CHECK_ADD_SEPARATOR:
+		case IDC_CHECK_TITLE_ACCENT:
+		case IDC_CHECK_TITLE_FILL:
+			if (HIWORD(wParam) == BN_CLICKED) {
+				// "Titulo con color de enfasis" and "Rellenar titulo" are
+				// mutually exclusive: checking one unchecks the other.
+				if (LOWORD(wParam) == IDC_CHECK_TITLE_ACCENT &&
+					Button_GetCheck(state->hwndCheckTitleAccent) == BST_CHECKED) {
+					Button_SetCheck(state->hwndCheckTitleFill, BST_UNCHECKED);
+				} else if (LOWORD(wParam) == IDC_CHECK_TITLE_FILL &&
+					Button_GetCheck(state->hwndCheckTitleFill) == BST_CHECKED) {
+					Button_SetCheck(state->hwndCheckTitleAccent, BST_UNCHECKED);
+				}
+				SaveSelectedNodeConfig(state);
+			}
+			return 0;
+		case IDC_COMBO_TITLE_WEIGHT:
 		case IDC_CHECK_MOUSEPOS:
 		case IDC_COMBO_SORT:
 		case IDC_EDIT_COLS:
@@ -2003,7 +2219,7 @@ int RunStackyConfigWindow(HINSTANCE hInstance) {
 	wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
 	::RegisterClass(&wc);
 
-	const int winW = 760, winH = 620;
+	const int winW = 760, winH = 710;
 	int screenW = ::GetSystemMetrics(SM_CXSCREEN);
 	int screenH = ::GetSystemMetrics(SM_CYSCREEN);
 	int posX = (screenW - winW) / 2;

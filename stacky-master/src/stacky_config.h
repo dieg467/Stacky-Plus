@@ -56,6 +56,24 @@ enum StackySubmenuLayout {
 	SCFG_LAYOUT_NAME_BELOW = 2  // .NN-name-below
 };
 
+// Font weight used for each section TITLE in SCFG_MODE_SPLITGRID ("Cuadricula
+// dividida de iconos"). Meaningless for every other mode.
+enum StackyTitleWeight {
+	SCFG_TITLE_WEIGHT_NORMAL   = 0,
+	SCFG_TITLE_WEIGHT_SEMIBOLD = 1,
+	SCFG_TITLE_WEIGHT_BOLD     = 2
+};
+
+// Border color applied to the menu/submenu/split-grid windows ("BORDE DEL
+// MENU" in the Configuration window). Does NOT apply to the native
+// right-click context menu (a plain Windows HMENU, outside the app's paint
+// control). Corners are always drawn rounded/antialiased when not DEFAULT.
+enum StackyMenuBorder {
+	SCFG_MENU_BORDER_DEFAULT = 0, // native WS_BORDER, system color, square corners
+	SCFG_MENU_BORDER_ACCENT  = 1, // rounded border using the hover/accent color
+	SCFG_MENU_BORDER_NONE    = 2  // rounded border using the menu background color (no visible border)
+};
+
 // The name of the hidden per-folder config file.
 static const StackyString STACKY_CONFIG_FILE_NAME = L".stacky-config";
 
@@ -79,6 +97,10 @@ struct StackyFolderConfig {
 	StackyConfigTheme theme = SCFG_THEME_SYSTEM;
 	bool     mouse_position = false;       // --mouseposition
 	StackyConfigSort sort_mode = SCFG_SORT_ALPHA;
+	StackyTitleWeight split_title_weight = SCFG_TITLE_WEIGHT_BOLD; // SCFG_MODE_SPLITGRID only: section TITLE font weight
+	bool     split_title_accent = false;   // SCFG_MODE_SPLITGRID only: TITLEs/separators use the accent/highlight color instead of the default gray
+	bool     split_title_fill = false;     // SCFG_MODE_SPLITGRID only: TITLEs use the background color and get a rounded accent-colored fill
+	StackyMenuBorder menu_border = SCFG_MENU_BORDER_DEFAULT; // all modes: menu/submenu/split-grid window border color
 
 	// Shared (root and submenu) fields
 	bool     mini_icons = false;           // --mini / .submenu-mini / .mini
@@ -115,6 +137,10 @@ struct StackyFolderConfig {
 		out << L"theme=" << (int)theme << L"\r\n";
 		out << L"mouse_position=" << FromBool(mouse_position) << L"\r\n";
 		out << L"sort_mode=" << (int)sort_mode << L"\r\n";
+		out << L"split_title_weight=" << (int)split_title_weight << L"\r\n";
+		out << L"split_title_accent=" << FromBool(split_title_accent) << L"\r\n";
+		out << L"split_title_fill=" << FromBool(split_title_fill) << L"\r\n";
+		out << L"menu_border=" << (int)menu_border << L"\r\n";
 		out << L"mini_icons=" << FromBool(mini_icons) << L"\r\n";
 		out << L"add_separator=" << FromBool(add_separator) << L"\r\n";
 		out << L"submenu_icon_path=" << submenu_icon_path << L"\r\n";
@@ -135,6 +161,10 @@ struct StackyFolderConfig {
 		else if (key == L"theme") theme = (StackyConfigTheme)_wtoi(value.c_str());
 		else if (key == L"mouse_position") mouse_position = ToBool(value);
 		else if (key == L"sort_mode") sort_mode = (StackyConfigSort)_wtoi(value.c_str());
+		else if (key == L"split_title_weight") split_title_weight = (StackyTitleWeight)_wtoi(value.c_str());
+		else if (key == L"split_title_accent") split_title_accent = ToBool(value);
+		else if (key == L"split_title_fill") split_title_fill = ToBool(value);
+		else if (key == L"menu_border") menu_border = (StackyMenuBorder)_wtoi(value.c_str());
 		else if (key == L"mini_icons") mini_icons = ToBool(value);
 		else if (key == L"add_separator") add_separator = ToBool(value);
 		else if (key == L"submenu_icon_path") submenu_icon_path = value;
